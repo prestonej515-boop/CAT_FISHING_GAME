@@ -66,6 +66,15 @@
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
 
+        const displaySettings = {
+        showFPS: false
+        };
+
+        const fpsCounter = {
+        lastFrameTime: 0,
+        smoothedFPS: 0
+        };
+
         // ============================================================
         // AUDIO / SOUND SYSTEM
         // ============================================================
@@ -672,6 +681,7 @@
         { label: 'SFX Volume', type: 'volume', group: 'sfx' },
         { label: 'UI Volume', type: 'volume', group: 'ui' },
         { label: 'Mute', type: 'toggle' },
+        { label: 'Show FPS', type: 'fpsToggle' },
         { label: 'Reset Audio', type: 'reset' },
         { label: 'Back', type: 'back' }
         ],
@@ -1068,6 +1078,11 @@
         playUISound('uiCancel', { volume: 0.75 });
         }
 
+        function toggleFPSSetting() {
+        displaySettings.showFPS = !displaySettings.showFPS;
+        playUISound(displaySettings.showFPS ? 'uiConfirm' : 'uiCancel', { volume: 0.55 });
+        }
+
         function adjustSelectedAudioOption(delta) {
         let item = menuUI.optionItems[menuUI.optionSelected];
         if (!item) return;
@@ -1077,6 +1092,8 @@
         playUISound('uiMove', { volume: 0.55, cooldown: 0.04 });
         } else if (item.type === 'toggle') {
         AudioManager.toggleMute();
+        } else if (item.type === 'fpsToggle') {
+        toggleFPSSetting();
         } else {
         playUISound('uiError', { volume: 0.65 });
         }
@@ -1098,6 +1115,8 @@
         adjustSelectedAudioOption(1);
         } else if (item.type === 'toggle') {
         AudioManager.toggleMute();
+        } else if (item.type === 'fpsToggle') {
+        toggleFPSSetting();
         } else if (item.type === 'reset') {
         AudioManager.resetSettings();
         } else if (item.type === 'back') {
@@ -4493,7 +4512,7 @@
         ctx.font = '10px "Press Start 2P"';
         ctx.fillText('cozy casts, tiny trophies, loud splashes', canvas.width / 2, 136);
 
-        drawMenuPanel(76, 188, 300, 328);
+        drawMenuPanel(76, 188, 300, 354);
         if (menuUI.screen === 'main') drawMainMenuRows(104, 220);
         else if (menuUI.screen === 'options') drawOptionsMenuRows(104, 208);
         else if (menuUI.screen === 'controls') drawControlsMenu(104, 220);
@@ -4585,6 +4604,8 @@
         drawVolumeBar(x + 28, rowY + 25, 176, AudioManager.settings[item.group], selected);
         } else if (item.type === 'toggle') {
         drawPixelMenuRow(x, rowY, 244, item.label, selected, AudioManager.settings.muted ? 'ON' : 'OFF');
+        } else if (item.type === 'fpsToggle') {
+        drawPixelMenuRow(x, rowY, 244, item.label, selected, displaySettings.showFPS ? 'ON' : 'OFF');
         } else {
         drawPixelMenuRow(x, rowY, 244, item.label, selected);
         }
@@ -4638,6 +4659,33 @@
         }
         }
 
+        function updateFPSCounter(now) {
+        if (!fpsCounter.lastFrameTime) {
+        fpsCounter.lastFrameTime = now;
+        return;
+        }
+        let delta = now - fpsCounter.lastFrameTime;
+        fpsCounter.lastFrameTime = now;
+        if (delta <= 0) return;
+        let currentFPS = 1000 / delta;
+        fpsCounter.smoothedFPS = fpsCounter.smoothedFPS
+        ? fpsCounter.smoothedFPS * 0.9 + currentFPS * 0.1
+        : currentFPS;
+        }
+
+        function drawFPSCounter() {
+        if (!displaySettings.showFPS) return;
+        ctx.save();
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.68)';
+        ctx.fillRect(canvas.width - 104, 10, 90, 28);
+        ctx.fillStyle = '#f9f1df';
+        ctx.font = '10px "Press Start 2P"';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(`FPS: ${Math.round(fpsCounter.smoothedFPS || 0)}`, canvas.width - 94, 29);
+        ctx.restore();
+        }
+
         // ============================================================
         // MAIN DRAW / SCENE RENDERING
         // ============================================================
@@ -4647,12 +4695,14 @@
         
         if (gameState === 'menu') {
         drawMenuScreen();
+        drawFPSCounter();
         ctx.restore();
         return;
         }
 
         if (gameState === 'intro') {
         drawIntroCutscene();
+        drawFPSCounter();
         ctx.restore();
         return;
         }
@@ -5273,6 +5323,7 @@
         else drawDialogueBox(line);
         }
         drawQuestLogOverlay();
+        drawFPSCounter();
         }
 
         // ============================================================
@@ -5284,7 +5335,8 @@
         loop();
         }
 
-        function loop() {
+        function loop(now = performance.now()) {
+        updateFPSCounter(now);
         update();
         draw();
         requestAnimationFrame(loop);
