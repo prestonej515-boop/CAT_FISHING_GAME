@@ -75,6 +75,13 @@
         smoothedFPS: 0
         };
 
+        const overlayLayout = {
+        top: 10,
+        right: 14,
+        gap: 6,
+        rowH: 28
+        };
+
         // ============================================================
         // AUDIO / SOUND SYSTEM
         // ============================================================
@@ -4673,16 +4680,70 @@
         : currentFPS;
         }
 
-        function drawFPSCounter() {
+        function getTopRightOverlayRows(includeTime = false, includeRain = false, includeDriving = false) {
+        let y = overlayLayout.top;
+        let rows = {};
+        if (displaySettings.showFPS) {
+        rows.fps = { x: canvas.width - overlayLayout.right - 90, y, w: 90, h: overlayLayout.rowH };
+        y += overlayLayout.rowH + overlayLayout.gap;
+        }
+        if (includeTime) {
+        rows.time = { x: canvas.width - overlayLayout.right - 140, y, w: 140, h: overlayLayout.rowH };
+        y += overlayLayout.rowH + overlayLayout.gap;
+        }
+        if (includeRain) {
+        rows.rain = { x: canvas.width - overlayLayout.right - 110, y, w: 110, h: overlayLayout.rowH };
+        y += overlayLayout.rowH + overlayLayout.gap;
+        }
+        if (includeDriving) {
+        rows.driving = { x: canvas.width - overlayLayout.right - 180, y, w: 180, h: 40 };
+        }
+        return rows;
+        }
+
+        function drawFPSCounter(row = null) {
         if (!displaySettings.showFPS) return;
+        row = row || getTopRightOverlayRows().fps;
+        if (!row) return;
         ctx.save();
         ctx.fillStyle = 'rgba(0, 0, 0, 0.68)';
-        ctx.fillRect(canvas.width - 104, 10, 90, 28);
+        ctx.fillRect(row.x, row.y, row.w, row.h);
         ctx.fillStyle = '#f9f1df';
         ctx.font = '10px "Press Start 2P"';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'alphabetic';
-        ctx.fillText(`FPS: ${Math.round(fpsCounter.smoothedFPS || 0)}`, canvas.width - 94, 29);
+        ctx.fillText(`FPS: ${Math.round(fpsCounter.smoothedFPS || 0)}`, row.x + 10, row.y + 19);
+        ctx.restore();
+        }
+
+        function drawTopRightStatus(hour) {
+        let rows = getTopRightOverlayRows(true, isRaining, player.isDriving);
+        drawFPSCounter(rows.fps);
+
+        ctx.save();
+        ctx.font = '10px "Press Start 2P"';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+
+        let timeString = `${Math.floor(hour).toString().padStart(2, '0')}:${Math.floor((hour % 1) * 60).toString().padStart(2, '0')}`;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.68)';
+        ctx.fillRect(rows.time.x, rows.time.y, rows.time.w, rows.time.h);
+        ctx.fillStyle = '#fff';
+        ctx.fillText(`Time: ${timeString}`, rows.time.x + 10, rows.time.y + 19);
+
+        if (rows.rain) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.68)';
+        ctx.fillRect(rows.rain.x, rows.rain.y, rows.rain.w, rows.rain.h);
+        ctx.fillStyle = '#3498db';
+        ctx.fillText('RAINING', rows.rain.x + 10, rows.rain.y + 19);
+        }
+
+        if (rows.driving) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(rows.driving.x, rows.driving.y, rows.driving.w, rows.driving.h);
+        ctx.fillStyle = '#fff';
+        ctx.fillText("Press F to Exit", rows.driving.x + 15, rows.driving.y + 25);
+        }
         ctx.restore();
         }
 
@@ -5242,15 +5303,7 @@
         ctx.font = '10px "Press Start 2P"';
         ctx.fillText(`Contracts: ${acceptedContracts} / Ready ${readyContracts}`, 25, 115);
 
-        // Time and weather display
-        ctx.fillStyle = '#fff'; ctx.font = '10px "Press Start 2P"';
-        let timeString = `${Math.floor(hour).toString().padStart(2, '0')}:${Math.floor((hour % 1) * 60).toString().padStart(2, '0')}`;
-        ctx.fillText(`Time: ${timeString}`, canvas.width - 150, 35);
-
-        if (isRaining) {
-        ctx.fillStyle = '#3498db';
-        ctx.fillText('RAINING', canvas.width - 150, 55);
-        }
+        drawTopRightStatus(hour);
 
         let barW = 126; let barH = 46;
         let barX = (canvas.width - barW) / 2; let barY = canvas.height - barH - 20;
@@ -5272,11 +5325,6 @@
         ctx.strokeStyle = rodInfo.color; ctx.lineWidth = 3; ctx.beginPath();
         ctx.moveTo(slotX + 8, barY + 35); ctx.lineTo(slotX + 28, barY + 12); ctx.stroke();
         }
-        }
-
-        if (player.isDriving) {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; ctx.fillRect(canvas.width - 200, 10, 180, 40);
-        ctx.fillStyle = '#fff'; ctx.font = '10px "Press Start 2P"'; ctx.fillText("Press F to Exit", canvas.width - 185, 35);
         }
 
         drawStoryObjectiveNotice();
@@ -5323,7 +5371,6 @@
         else drawDialogueBox(line);
         }
         drawQuestLogOverlay();
-        drawFPSCounter();
         }
 
         // ============================================================
