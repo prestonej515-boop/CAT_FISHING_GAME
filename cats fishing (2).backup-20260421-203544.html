@@ -447,6 +447,7 @@
         { name: 'Painted Sunfish', value: 48, minLength: 5, maxLength: 12, color: '#e67e22', baseSpeed: 0.060, baseSpot: 0.10, weights:[4, 10, 18, 24] },
         { name: 'Ancient Sturgeon', value: 170, minLength: 36, maxLength: 96, color: '#566573', baseSpeed: 0.088, baseSpot: 0.04, weights:[0.2, 1.5, 5, 12] }
         ];
+        const fishTypes = generalFishTypes;
         const fishPools = {
         home: [{ fish: generalFishTypes, weightScale: 1 }],
         ocean: [{ fish: oceanFishTypes, weightScale: 1 }],
@@ -456,7 +457,6 @@
         ]
         };
         const allFishTypes = [...generalFishTypes, ...oceanFishTypes, ...lakeFishTypes];
-        const speciesBiomeCache = new Map();
         const rarityTiers = [
         { id: 'common', label: 'Common', weight: 70, valueMultiplier: 1, color: '#ecf0f1' },
         { id: 'uncommon', label: 'Uncommon', weight: 22, valueMultiplier: 1.35, color: '#2ecc71' },
@@ -550,7 +550,6 @@
         lastMessage: "Fresh orders are pinned up.",
         rerollCost: 25
         };
-        const contractHudCounts = { accepted: 0, ready: 0 };
 
         const depositUI = {
         open: false,
@@ -717,7 +716,6 @@
         let nextRainCheck = 300; // Frames until next rain chance check
         let raindrops = [];
         let cloudOffset = 0;
-        const interiorScenes = new Set(['indoors', 'shop']);
 
         // ============================================================
         // WORLD / MAP DATA
@@ -888,10 +886,6 @@
 
         function getCurrentBait() {
         return getBaitByLevel(player.baitLevel);
-        }
-
-        function getFishBagValue() {
-        return player.fishBag.reduce((sum, fish) => sum + fish.value, 0);
         }
 
         function getSouthLakeUnlockRequirements() {
@@ -1842,13 +1836,11 @@
         }
 
         function getBiomesForSpecies(species) {
-        if (speciesBiomeCache.has(species)) return speciesBiomeCache.get(species);
         let matches = [];
         for (let biome in fishPools) {
         let pool = fishPools[biome];
         if (pool.some(group => group.fish.includes(species))) matches.push(biome);
         }
-        speciesBiomeCache.set(species, matches);
         return matches;
         }
 
@@ -2132,6 +2124,29 @@
         return contract.type !== 'total_value' || fish.value > 0;
         }
 
+        function getMatchingFishIndicesForContract(contract) {
+        let matches = [];
+        if (contract.type === 'total_value') {
+        let candidates = player.fishBag
+        .map((fish, index) => ({ fish, index }))
+        .filter(entry => entry.fish.value > 0)
+        .sort((a, b) => a.fish.value - b.fish.value);
+        let total = 0;
+        for (let entry of candidates) {
+        matches.push(entry.index);
+        total += entry.fish.value;
+        if (total >= contract.targetValue) break;
+        }
+        return total >= contract.targetValue ? matches : [];
+        }
+
+        let candidates = player.fishBag
+        .map((fish, index) => ({ fish, index }))
+        .filter(entry => fishMatchesContract(entry.fish, contract))
+        .sort((a, b) => (a.fish.value - b.fish.value) || (a.fish.length - b.fish.length));
+        return candidates.slice(0, contract.quantity).map(entry => entry.index);
+        }
+
         function getContractProgress(contract) {
         if (contract.type === 'total_value') {
         let total = contract.depositedValue || 0;
@@ -2153,17 +2168,10 @@
         }
         }
 
-        function getContractHudCounts() {
+        function getReadyContractCount() {
         if (contractBoard.active.length === 0) refillEmptyContracts();
         updateContractBoardProgress();
-        contractHudCounts.accepted = 0;
-        contractHudCounts.ready = 0;
-        for (let contract of contractBoard.active) {
-        if (!contract.accepted || contract.completed) continue;
-        contractHudCounts.accepted++;
-        if (contract.claimable) contractHudCounts.ready++;
-        }
-        return contractHudCounts;
+        return contractBoard.active.filter(contract => contract.accepted && contract.claimable).length;
         }
 
         function getContractProgressText(contract) {
@@ -2180,6 +2188,20 @@
         return 'Accepted';
         }
 
+        function getContractFailureMessage(contract) {
+        if (player.fishBag.length === 0) return "No fish in your bag right now.";
+        if (contract.type === 'species_size') return "Bring me a bigger one.";
+        if (contract.type === 'species_rarity') return "Right fish, wrong shine. Keep casting.";
+        if (contract.type === 'total_value') return "That bag is not valuable enough yet.";
+        if (contract.type === 'biome_count') return "Those need to come from the right water.";
+        return "Not enough matching fish.";
+        }
+
+        function consumeFishForContract(indices) {
+        let sorted = [...indices].sort((a, b) => b - a);
+        for (let index of sorted) player.fishBag.splice(index, 1);
+        }
+
         function awardContractReward(contract) {
         awardMoney(contract.reward, true, true);
         addFloatingText(`CONTRACT +$${contract.reward}`, player.x - 34, player.y - 48, '#f1c40f');
@@ -2189,6 +2211,11 @@
         refillEmptyContracts();
         updateContractBoardProgress();
         return contractBoard.active.filter(contract => contract.accepted && !contract.completed);
+        }
+
+        function getAvailableContracts() {
+        refillEmptyContracts();
+        return contractBoard.active.filter(contract => !contract.accepted && !contract.completed);
         }
 
         function acceptSelectedContract() {
@@ -2503,7 +2530,7 @@
         }
 
         function sellFishFromShopUI() {
-        let earned = getFishBagValue();
+        let earned = player.fishBag.reduce((sum, fish) => sum + fish.value, 0);
         let soldCount = player.fishBag.filter(fish => fish.value > 0).length;
         if (earned <= 0 && player.fishBag.length === 0) {
         setShopMessage("No fish in your bag right now.");
@@ -3513,7 +3540,7 @@
         drawShopMenuRow(menuX, menuY + i * 42, 410, label, i === shopUI.selected, bait.color);
         }
         } else if (shopUI.mode === 'sell') {
-        let fishValue = getFishBagValue();
+        let fishValue = player.fishBag.reduce((sum, fish) => sum + fish.value, 0);
         let sellOptions = [`Sell Fish Bag  $${fishValue}`, 'Sell Old Gear  Soon'];
         for (let i = 0; i < sellOptions.length; i++) {
         drawShopMenuRow(menuX, menuY + i * 54, 410, sellOptions[i], i === shopUI.selected);
@@ -3716,7 +3743,10 @@
         }
 
         function drawRain() {
-        if (!isRaining || interiorScenes.has(currentScene)) return;
+        // Check if rain should be disabled in interior scenes
+        let indoorScenes = ['indoors', 'shop']; // Add future interior scenes here
+        
+        if (!isRaining || indoorScenes.includes(currentScene)) return;
         
         ctx.save();
         ctx.strokeStyle = `rgba(200, 200, 255, ${rainIntensity * 0.6})`;
@@ -5267,10 +5297,11 @@
         ctx.fillStyle = '#f1c40f'; ctx.fillText(`Money: $${player.money}`, 25, 55);
         ctx.fillStyle = rodInfo.color; ctx.fillText(`Rod:   ${rodInfo.name}`, 25, 75);
         ctx.fillStyle = baitInfo.color; ctx.fillText(`Bait:  ${baitInfo.name}`, 25, 95);
-        let contractCounts = getContractHudCounts();
-        ctx.fillStyle = contractCounts.ready > 0 ? '#f1c40f' : '#d7b46a';
+        let acceptedContracts = getAcceptedContracts().length;
+        let readyContracts = getReadyContractCount();
+        ctx.fillStyle = readyContracts > 0 ? '#f1c40f' : '#d7b46a';
         ctx.font = '10px "Press Start 2P"';
-        ctx.fillText(`Contracts: ${contractCounts.accepted} / Ready ${contractCounts.ready}`, 25, 115);
+        ctx.fillText(`Contracts: ${acceptedContracts} / Ready ${readyContracts}`, 25, 115);
 
         drawTopRightStatus(hour);
 
@@ -5326,7 +5357,7 @@
 
         ctx.fillStyle = '#fff';
         ctx.font = '10px "Press Start 2P"';
-        let totalValue = getFishBagValue();
+        let totalValue = player.fishBag.reduce((sum, fish) => sum + fish.value, 0);
         ctx.fillText(`Total Value: $${totalValue}`, 145, canvas.height - 75);
         ctx.fillText(`Press I to Close`, canvas.width - 275, canvas.height - 75);
         }
