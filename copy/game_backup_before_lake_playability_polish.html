@@ -1,0 +1,2394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cat Fisherman RPG</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background-color: #2c3e50;
+            color: #ecf0f1;
+            font-family: 'Press Start 2P', monospace;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        h1 {
+            font-size: 24px;
+            margin-bottom: 10px;
+            color: #f1c40f;
+        }
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 20px rgba(0,0,0,0.8);
+        }
+        canvas {
+            display: block;
+            background-color: #7ec850; 
+            image-rendering: pixelated; 
+        }
+        .instructions {
+            margin-top: 15px;
+            font-size: 12px;
+            line-height: 1.5;
+            text-align: center;
+            color: #bdc3c7;
+        }
+        kbd {
+            background: #34495e;
+            padding: 3px 6px;
+            border-radius: 3px;
+            color: #f1c40f;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Cat Fisherman</h1>
+    <div id="game-container">
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+    </div>
+    <div class="instructions">
+        Move: <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> or <kbd>Arrows</kbd> | Go Inside: Walk into door<br><br>
+        Near Water: Hold <kbd>SPACE</kbd> to Fish <br>
+        At Town Shop: <kbd>E</kbd> to Sell Fish | <kbd>B</kbd> to Buy Rod Upgrade
+    </div>
+
+    <script>
+        // ============================================================
+        // CANVAS / SETUP
+        // ============================================================
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // ============================================================
+        // CONSTANTS / CONFIG
+        // ============================================================
+        const keys = {};
+        let gameState = 'menu'; // 'menu' or 'playing'
+        let currentScene = 'outdoors'; // 'outdoors', 'indoors', or 'shop'
+        const MAP_WIDTH = 1600;
+        const WORLD_TOP = -760;
+        const WORLD_BOTTOM = 2240;
+        let cameraX = 0;
+        let cameraY = 0;
+
+        // ============================================================
+        // GAME DATA
+        // ============================================================
+        // Upgrades now act as Multipliers! They make the base fish stats easier to catch.
+        const rodUpgrades =[
+        { level: 1, cost: 0, color: '#bdc3c7', name: 'Stick', spotMulti: 1.0, speedMulti: 1.0 },
+        { level: 2, cost: 50, color: '#f1c40f', name: 'Bamboo', spotMulti: 1.15, speedMulti: 0.85 },
+        { level: 3, cost: 200, color: '#3498db', name: 'Carbon', spotMulti: 1.3, speedMulti: 0.70 },
+        { level: 4, cost: 750, color: '#9b59b6', name: 'Magic', spotMulti: 1.5, speedMulti: 0.55 }
+        ];
+
+        // Fish species are grouped by biome pools below. Weights are [Level 1, Level 2, Level 3, Level 4].
+        const generalFishTypes =[
+        { name: 'Old Boot', value: 0, minLength: 8, maxLength: 14, color: '#7f8c8d', baseSpeed: 0.02, baseSpot: 0.30, weights: [25, 15, 5, 1] },
+        { name: 'Minnow', value: 5, minLength: 1.5, maxLength: 4, color: '#bdc3c7', baseSpeed: 0.025, baseSpot: 0.25, weights:[55, 40, 25, 10] },
+        { name: 'Trout', value: 12, minLength: 10, maxLength: 24, color: '#2ecc71', baseSpeed: 0.035, baseSpot: 0.20, weights: [15, 25, 30, 20] },
+        { name: 'Salmon', value: 30, minLength: 20, maxLength: 36, color: '#e74c3c', baseSpeed: 0.050, baseSpot: 0.12, weights:[4.5, 15, 25, 35] },
+        { name: 'Catfish', value: 60, minLength: 18, maxLength: 40, color: '#34495e', baseSpeed: 0.065, baseSpot: 0.08, weights: [0.4, 4, 12, 24] },
+        { name: 'Golden Koi', value: 150, minLength: 12, maxLength: 28, color: '#f1c40f', baseSpeed: 0.085, baseSpot: 0.04, weights:[0.1, 1, 3, 10] },
+        { name: 'Bluegill', value: 8, minLength: 4, maxLength: 12, color: '#5dade2', baseSpeed: 0.030, baseSpot: 0.23, weights:[20, 24, 24, 18] },
+        { name: 'Perch', value: 10, minLength: 6, maxLength: 14, color: '#f4d03f', baseSpeed: 0.034, baseSpot: 0.21, weights:[16, 22, 24, 18] },
+        { name: 'Crappie', value: 14, minLength: 6, maxLength: 15, color: '#d5dbdb', baseSpeed: 0.038, baseSpot: 0.19, weights:[12, 18, 22, 18] },
+        { name: 'Small Bass', value: 18, minLength: 10, maxLength: 18, color: '#229954', baseSpeed: 0.043, baseSpot: 0.17, weights:[8, 15, 22, 22] },
+        { name: 'Mud Sucker', value: 22, minLength: 8, maxLength: 18, color: '#8e5b3a', baseSpeed: 0.046, baseSpot: 0.16, weights:[7, 13, 18, 18] },
+        { name: 'Silver Shiner', value: 26, minLength: 3, maxLength: 8, color: '#ecf0f1', baseSpeed: 0.052, baseSpot: 0.14, weights:[5, 11, 18, 20] },
+        { name: 'River Pike', value: 42, minLength: 18, maxLength: 36, color: '#7dcea0', baseSpeed: 0.060, baseSpot: 0.11, weights:[2, 7, 13, 18] },
+        { name: 'Speckled Carp', value: 50, minLength: 12, maxLength: 30, color: '#b7950b', baseSpeed: 0.064, baseSpot: 0.10, weights:[1.5, 6, 12, 18] },
+        { name: 'Moon Eel', value: 85, minLength: 18, maxLength: 42, color: '#af7ac5', baseSpeed: 0.076, baseSpot: 0.07, weights:[0.4, 2, 6, 12] },
+        { name: 'Starlight Guppy', value: 120, minLength: 1, maxLength: 3.5, color: '#85c1e9', baseSpeed: 0.082, baseSpot: 0.05, weights:[0.2, 1, 4, 9] }
+        ];
+        const oceanFishTypes =[
+        { name: 'Sardine', value: 9, minLength: 6, maxLength: 10, color: '#abb2b9', baseSpeed: 0.032, baseSpot: 0.22, weights:[45, 35, 24, 14] },
+        { name: 'Mackerel', value: 24, minLength: 10, maxLength: 24, color: '#2980b9', baseSpeed: 0.048, baseSpot: 0.15, weights:[12, 22, 26, 22] },
+        { name: 'Pufferfish', value: 55, minLength: 6, maxLength: 14, color: '#f5b041', baseSpeed: 0.062, baseSpot: 0.10, weights:[3, 9, 17, 24] },
+        { name: 'Lantern Tuna', value: 140, minLength: 24, maxLength: 60, color: '#48c9b0', baseSpeed: 0.084, baseSpot: 0.05, weights:[0.3, 2, 6, 13] }
+        ];
+        const lakeFishTypes =[
+        { name: 'Lake Dace', value: 11, minLength: 3, maxLength: 8, color: '#76d7c4', baseSpeed: 0.032, baseSpot: 0.22, weights:[34, 30, 22, 15] },
+        { name: 'Moss Bass', value: 32, minLength: 12, maxLength: 24, color: '#196f3d', baseSpeed: 0.052, baseSpot: 0.13, weights:[8, 18, 26, 26] },
+        { name: 'Painted Sunfish', value: 48, minLength: 5, maxLength: 12, color: '#e67e22', baseSpeed: 0.060, baseSpot: 0.10, weights:[4, 10, 18, 24] },
+        { name: 'Ancient Sturgeon', value: 170, minLength: 36, maxLength: 96, color: '#566573', baseSpeed: 0.088, baseSpot: 0.04, weights:[0.2, 1.5, 5, 12] }
+        ];
+        const fishTypes = generalFishTypes;
+        const fishPools = {
+        home: [{ fish: generalFishTypes, weightScale: 1 }],
+        ocean: [{ fish: oceanFishTypes, weightScale: 1 }],
+        lake: [
+        { fish: generalFishTypes, weightScale: 0.65 },
+        { fish: lakeFishTypes, weightScale: 2.1 }
+        ]
+        };
+        const allFishTypes = [...generalFishTypes, ...oceanFishTypes, ...lakeFishTypes];
+        const rarityTiers = [
+        { id: 'common', label: 'Common', weight: 70, valueMultiplier: 1, color: '#ecf0f1' },
+        { id: 'uncommon', label: 'Uncommon', weight: 22, valueMultiplier: 1.35, color: '#2ecc71' },
+        { id: 'rare', label: 'Rare', weight: 7, valueMultiplier: 2, color: '#3498db' },
+        { id: 'trophy', label: 'Trophy', weight: 1, valueMultiplier: 3.5, color: '#f1c40f' }
+        ];
+        const fishValueSettings = {
+        lengthMultiplierMin: 0.85,
+        lengthMultiplierMax: 1.25
+        };
+
+        // ============================================================
+        // ENTITY / GAME STATE
+        // ============================================================
+        const player = {
+        x: 170,
+        y: 250,
+        w: 24,
+        h: 24,
+        speed: 3.5,
+        color: '#e67e22',
+        fishBag:[],
+        money: 0,
+        rodLevel: 1,
+
+        fishingState: 'none',
+        fishingTimer: 0,
+        currentFish: null, // The fish currently on the line!
+        currentFishingBiome: 'home',
+        minigameCursor: 0,
+        minigameDir: 1,
+
+        facing: 'down',
+        isMoving: false,
+        walkTimer: 0,
+        inventory: ['fishing_rod', null, null],
+        activeSlot: 0,
+        isDriving: false,
+        showInventory: false
+        };
+
+        const truck = {
+        x: 460,
+        y: 190,
+        w: 48,
+        h: 48,
+        angle: 0,
+        vx: 0,
+        vy: 0
+        };
+
+        let floatingTexts =[];
+        let birds = [];
+        let jumpingFish = [];
+        let birdSpawnTimer = 220;
+        let fishJumpTimer = 145;
+
+        // ============================================================
+        // UI STATE
+        // ============================================================
+        const shopUI = {
+        open: false,
+        mode: 'main',
+        selected: 0,
+        message: "Welcome in! What can I do for you?",
+        messageTimer: 0,
+        waitForInteractRelease: false
+        };
+
+        // ============================================================
+        // TIME / WEATHER STATE
+        // ============================================================
+        let gameTime = 1200; // Start at noon (0-2400 represents 24 hours)
+        let timeSpeed = 0.1; // How fast time progresses (much slower now)
+        let isRaining = false;
+        let rainIntensity = 0;
+        let rainTimer = 0;
+        let nextRainCheck = 300; // Frames until next rain chance check
+        let raindrops = [];
+        let cloudOffset = 0;
+
+        // ============================================================
+        // WORLD / MAP DATA
+        // ============================================================
+      const waterBlocks = [
+         { x: 20, y: 40, w: 400, h: 80, biome: 'home' },
+         { x: 20, y: 500, w: 400, h: 80, biome: 'home' },
+         { x: 20, y: 120, w: 80, h: 380, biome: 'home' },
+         { x: 340, y: 120, w: 100, h: 120, biome: 'home' },
+         { x: 340, y: 360, w: 100, h: 140, biome: 'home' }
+        ];
+        const bridge = { x: 340, y: 240, w: 100, h: 120 };
+        const road = { x: 440, y: 240, w: 860, h: 120 };
+        const marketLot = { x: 1300, y: 0, w: 300, h: 600 };
+        const homeParkSpot = { x: 450, y: 190, w: 90, h: 50 };
+        const OCEAN_TOP = -1800;
+        const beach = { x: 0, y: -560, w: MAP_WIDTH, h: 250 };
+        const northRoad = {
+        width: 84,
+        startX: road.x + road.w / 2,
+        startY: road.y + road.h / 2,
+        bendX: road.x + road.w / 2,
+        bendY: 15,
+        endX: road.x + road.w / 2 + 260,
+        endY: beach.y + 135
+        };
+        const roadSign = { x: road.x + road.w / 2 - 150, y: road.y - 78, collision: { x: road.x + road.w / 2 - 150, y: road.y - 78, w: 88, h: 70 } };
+        const dock = { x: northRoad.endX - 30, y: beach.y - 66, w: 60, h: 126 };
+        const southRoad = {
+        width: 70,
+        startX: road.x + road.w / 2 - 145,
+        startY: road.y + road.h + 2,
+        controlX: road.x + road.w / 2 - 255,
+        controlY: 850,
+        endX: road.x + road.w / 2 - 115,
+        endY: 1228
+        };
+        const southLake = { x: 305, y: 1270, w: 990, h: 615, biome: 'lake' };
+        const lakeWaterBlocks = [
+        { x: southLake.x + 395, y: southLake.y + 10, w: 260, h: 34, biome: 'lake' },
+        { x: southLake.x + 265, y: southLake.y + 44, w: 520, h: 58, biome: 'lake' },
+        { x: southLake.x + 155, y: southLake.y + 102, w: 705, h: 72, biome: 'lake' },
+        { x: southLake.x + 80, y: southLake.y + 174, w: 825, h: 78, biome: 'lake' },
+        { x: southLake.x + 36, y: southLake.y + 252, w: 780, h: 82, biome: 'lake' },
+        { x: southLake.x + 88, y: southLake.y + 334, w: 820, h: 78, biome: 'lake' },
+        { x: southLake.x + 150, y: southLake.y + 412, w: 760, h: 72, biome: 'lake' },
+        { x: southLake.x + 230, y: southLake.y + 484, w: 585, h: 66, biome: 'lake' },
+        { x: southLake.x + 355, y: southLake.y + 550, w: 310, h: 50, biome: 'lake' }
+        ];
+        const lakeShore = { x: southLake.x - 58, y: southLake.y - 48, w: southLake.w + 118, h: southLake.h + 98 };
+        const lakeIsland = { x: southLake.x + 552, y: southLake.y + 188, w: 238, h: 170 };
+        const lakeBridgeA = { x: southLake.x + 257, y: southLake.y + 270, w: 342, h: 166, x1: southLake.x + 270, y1: southLake.y + 408, x2: southLake.x + 585, y2: southLake.y + 284, width: 46 };
+        const lakeBridgeB = { x: southLake.x + 422, y: southLake.y + 92, w: 196, h: 148, x1: southLake.x + 438, y1: southLake.y + 108, x2: southLake.x + 595, y2: southLake.y + 224, width: 42 };
+        const lakeTreeLine = [
+        { x: 210, y: 1198, w: 50, h: 78 }, { x: 260, y: 1166, w: 54, h: 84 }, { x: 318, y: 1192, w: 48, h: 76 },
+        { x: 374, y: 1158, w: 52, h: 82 }, { x: 430, y: 1180, w: 46, h: 74 }, { x: 930, y: 1172, w: 50, h: 78 },
+        { x: 982, y: 1148, w: 56, h: 86 }, { x: 1042, y: 1168, w: 48, h: 76 }, { x: 1100, y: 1156, w: 54, h: 84 },
+        { x: 1160, y: 1184, w: 50, h: 78 }, { x: 1218, y: 1174, w: 56, h: 86 }, { x: 1276, y: 1212, w: 50, h: 78 },
+        { x: 138, y: 1268, w: 54, h: 84 }, { x: 194, y: 1306, w: 48, h: 76 }, { x: 124, y: 1368, w: 56, h: 86 },
+        { x: 184, y: 1432, w: 50, h: 78 }, { x: 126, y: 1506, w: 54, h: 84 }, { x: 190, y: 1578, w: 48, h: 76 },
+        { x: 134, y: 1648, w: 56, h: 86 }, { x: 198, y: 1724, w: 50, h: 78 }, { x: 156, y: 1796, w: 54, h: 84 },
+        { x: 230, y: 1848, w: 48, h: 76 }, { x: 294, y: 1898, w: 56, h: 86 }, { x: 352, y: 1868, w: 50, h: 78 },
+        { x: 1340, y: 1270, w: 52, h: 82 }, { x: 1392, y: 1326, w: 56, h: 86 }, { x: 1320, y: 1390, w: 48, h: 76 },
+        { x: 1384, y: 1454, w: 54, h: 84 }, { x: 1328, y: 1524, w: 50, h: 78 }, { x: 1390, y: 1596, w: 56, h: 86 },
+        { x: 1328, y: 1668, w: 48, h: 76 }, { x: 1376, y: 1744, w: 54, h: 84 }, { x: 1306, y: 1812, w: 50, h: 78 },
+        { x: 1248, y: 1870, w: 56, h: 86 }, { x: 1188, y: 1902, w: 48, h: 76 },
+        { x: 382, y: 1948, w: 54, h: 84 }, { x: 438, y: 1992, w: 48, h: 76 }, { x: 500, y: 1944, w: 56, h: 86 },
+        { x: 566, y: 1984, w: 50, h: 78 }, { x: 630, y: 1948, w: 54, h: 84 }, { x: 700, y: 1990, w: 48, h: 76 },
+        { x: 768, y: 1940, w: 56, h: 86 }, { x: 840, y: 1984, w: 50, h: 78 }, { x: 908, y: 1942, w: 54, h: 84 },
+        { x: 980, y: 1978, w: 48, h: 76 }, { x: 1048, y: 1932, w: 56, h: 86 }, { x: 1120, y: 1956, w: 50, h: 78 },
+        { x: 260, y: 1238, w: 44, h: 70 }, { x: 1012, y: 1220, w: 44, h: 70 }, { x: 220, y: 1388, w: 44, h: 70 },
+        { x: 1286, y: 1338, w: 44, h: 70 }, { x: 246, y: 1542, w: 44, h: 70 }, { x: 1278, y: 1642, w: 44, h: 70 },
+        { x: 278, y: 1742, w: 44, h: 70 }, { x: 1214, y: 1782, w: 44, h: 70 }, { x: 456, y: 1886, w: 44, h: 70 },
+        { x: 1140, y: 1850, w: 44, h: 70 }
+        ];
+        
+        // Wide northern ocean. It extends above WORLD_TOP so the camera never sees its far edge.
+       const northOcean = { x: 0, y: OCEAN_TOP, w: MAP_WIDTH, h: beach.y - OCEAN_TOP, biome: 'ocean' };
+       waterBlocks.push(northOcean);
+       for (let lakeWater of lakeWaterBlocks) waterBlocks.push(lakeWater);
+        
+
+        const hut = { x: 120, y: 140, w: 120, h: 90 };
+        const hutWalls =[
+        { x: 120, y: 170, w: 40, h: 60 },
+        { x: 200, y: 170, w: 40, h: 60 },
+        { x: 120, y: 170, w: 120, h: 30 }
+        ];
+        const doorZone = { x: 160, y: 190, w: 40, h: 40 };
+        const shop = { x: 1350, y: 200, w: 180, h: 120 };
+        const shopZone = { x: 1350, y: 320, w: 180, h: 60 };
+        const shopDoor = { x: shop.x + shop.w / 2 - 18, y: shop.y + 82, w: 36, h: 38 };
+        const shopEntry = { x: shopDoor.x - 6, y: shop.y + shop.h, w: shopDoor.w + 12, h: 28 };
+        const shopRoom = { x: 200, y: 150, w: 400, h: 300 };
+        const shopExit = { x: 380, y: 440, w: 40, h: 20 };
+        const shopCounter = { x: shopRoom.x + 70, y: shopRoom.y + 110, w: 260, h: 58 };
+        const shopCounterArea = { x: shopCounter.x, y: shopCounter.y + shopCounter.h, w: shopCounter.w, h: 40 };
+        const shopWalls = [
+            { x: 200, y: 150, w: 400, h: 8 },   // top
+            { x: 200, y: 150, w: 8,   h: 300 }, // left
+            { x: 592, y: 150, w: 8,   h: 300 }, // right
+            { x: 200, y: 442, w: 400, h: 8 }    // bottom
+        ];
+        const room = { x: 200, y: 150, w: 400, h: 300 };
+        const roomExit = { x: 380, y: 440, w: 40, h: 20 };
+        const bed = { x: 220, y: 170, w: 60, h: 90 };
+
+        // ============================================================
+        // UTILITY HELPERS
+        // ============================================================
+        // --- GAME LOGIC HELPER: Weighted Random Fish ---
+        function getFishPoolForBiome(biome) {
+        return fishPools[biome] || fishPools.home;
+        }
+
+        function getRandomFish(rodLevel, biome = 'home') {
+        let totalWeight = 0;
+        let rodIndex = Math.max(0, Math.min(rodLevel - 1, rodUpgrades.length - 1));
+        let pool = getFishPoolForBiome(biome);
+
+        for (let group of pool) {
+        for (let f of group.fish) totalWeight += f.weights[rodIndex] * group.weightScale;
+        }
+
+        let roll = Math.random() * totalWeight;
+        for (let group of pool) {
+        for (let f of group.fish) {
+        roll -= f.weights[rodIndex] * group.weightScale;
+        if (roll <= 0) return f;
+        }
+        }
+        return pool[0].fish[0]; // Fallback
+        }
+
+        function rollWeightedRarity() {
+        let totalWeight = rarityTiers.reduce((sum, tier) => sum + tier.weight, 0);
+        let roll = Math.random() * totalWeight;
+        for (let tier of rarityTiers) {
+        roll -= tier.weight;
+        if (roll <= 0) return tier;
+        }
+        return rarityTiers[0];
+        }
+
+        function rollFishLength(species) {
+        let minLength = species.minLength || 1;
+        let maxLength = species.maxLength || minLength;
+        return minLength + Math.random() * (maxLength - minLength);
+        }
+
+        function getLengthMultiplier(species, length) {
+        if (species.maxLength <= species.minLength) return 1;
+        let lengthRatio = (length - species.minLength) / (species.maxLength - species.minLength);
+        return fishValueSettings.lengthMultiplierMin + lengthRatio * (fishValueSettings.lengthMultiplierMax - fishValueSettings.lengthMultiplierMin);
+        }
+
+        function calculateFishValue(species, rarity, length) {
+        if (species.value <= 0) return 0;
+        let rarityMultiplier = rarity.valueMultiplier;
+        let lengthMultiplier = getLengthMultiplier(species, length);
+        return Math.max(1, Math.round(species.value * rarityMultiplier * lengthMultiplier));
+        }
+
+        function createCaughtFish(species) {
+        let rarity = rollWeightedRarity();
+        let length = rollFishLength(species);
+        return {
+        ...species,
+        speciesName: species.name,
+        rarity: rarity.id,
+        rarityLabel: rarity.label,
+        rarityMultiplier: rarity.valueMultiplier,
+        rarityColor: rarity.color,
+        length: length,
+        lengthDisplay: formatFishLength(length),
+        value: calculateFishValue(species, rarity, length),
+        baseValue: species.value
+        };
+        }
+
+        function formatFishLength(length) {
+        return `${length.toFixed(1)} in`;
+        }
+
+        function getCatchMessage(fish) {
+        return `${fish.rarityLabel} ${fish.name} ${fish.lengthDisplay} $${fish.value}`;
+        }
+
+        // ============================================================
+        // INPUT HANDLING
+        // ============================================================
+        function handleKeyDown(e) {
+        if(["Space","ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.code)) e.preventDefault();
+
+        // Menu input handling
+        if (gameState === 'menu') {
+        if(e.code === 'Space' || e.code === 'Enter') {
+        gameState = 'playing';
+        }
+        return;
+        }
+
+        if (shopUI.open) {
+        handleShopUIInput(e.code);
+        return;
+        }
+
+        if(e.code === 'KeyI') {
+        player.showInventory = !player.showInventory;
+        keys['Space'] = false;
+        return;
+        }
+
+        if (player.showInventory) return;
+
+        keys[e.code] = true;
+
+        if(e.code === 'Digit1') player.activeSlot = 0;
+        if(e.code === 'Digit2') player.activeSlot = 1;
+        if(e.code === 'Digit3') player.activeSlot = 2;
+
+        if(e.code === 'KeyE' && currentScene === 'shop' && inZone(player, shopCounterArea) && !shopUI.waitForInteractRelease) {
+        openShopUI();
+        keys[e.code] = false;
+        return;
+        }
+
+        if(e.code === 'KeyF' && currentScene === 'outdoors') {
+        if(player.isDriving) {
+        player.isDriving = false;
+        player.w = 24; player.h = 24;
+        truck.x = player.x; truck.y = player.y;
+        player.y -= 35;
+        if (!canMoveTo(player.x, player.y)) player.y += 80;
+        player.facing = 'down';
+        } else {
+        let reach = { x: player.x - 20, y: player.y - 20, w: player.w + 40, h: player.h + 40 };
+        if (rectIntersect(reach, truck)) {
+        player.isDriving = true;
+        player.x = truck.x; player.y = truck.y;
+        player.w = 48; player.h = 48;
+        player.fishingState = 'none';
+        }
+        }
+        }
+
+        if(e.code === 'KeyR' && currentScene === 'outdoors' && inZone(player, shopZone) && !player.isDriving) {
+        truck.x = 460; truck.y = 190; truck.vx = 0; truck.vy = 0; truck.angle = 0;
+        addFloatingText("Truck Towed!", player.x, player.y - 20, '#f1c40f');
+        }
+
+        if(e.code === 'Space' && !e.repeat && currentScene === 'outdoors' && !player.isDriving && !inZone(player, shopZone)) {
+        let isHoldingRod = player.inventory[player.activeSlot] === 'fishing_rod';
+        if (isHoldingRod) {
+        let fishingBiome = getFacingWaterBiome();
+        if (player.fishingState === 'none' && fishingBiome) {
+        player.fishingState = 'waiting';
+        player.currentFishingBiome = fishingBiome;
+        player.fishingTimer = Math.floor(Math.random() * 90) + 60;
+        }
+        else if (player.fishingState === 'waiting') {
+        player.fishingState = 'none';
+        addFloatingText("Too early!", player.x, player.y - 20, '#e74c3c');
+        }
+        else if (player.fishingState === 'minigame') {
+        // CALCULATE IF WON OR LOST
+        let rod = rodUpgrades[player.rodLevel - 1];
+        let sweetSpot = player.currentFish.baseSpot * rod.spotMulti;
+        if (sweetSpot > 0.95) sweetSpot = 0.95; // Cap to prevent math breaks
+
+        let center = 0.5;
+        let min = center - sweetSpot / 2;
+        let max = center + sweetSpot / 2;
+
+        if (player.minigameCursor >= min && player.minigameCursor <= max) {
+        player.fishBag.push(player.currentFish);
+        addFloatingText("+" + getCatchMessage(player.currentFish), player.x, player.y - 20, player.currentFish.rarityColor);
+        } else {
+        addFloatingText("Got away...", player.x, player.y - 20, '#e74c3c');
+        }
+        player.fishingState = 'none';
+        }
+        }
+        }
+        }
+
+        function handleKeyUp(e) {
+        if(e.code === 'KeyE') shopUI.waitForInteractRelease = false;
+        if (shopUI.open) {
+        keys[e.code] = false;
+        return;
+        }
+        if (player.showInventory) return;
+        keys[e.code] = false;
+        }
+
+        // ============================================================
+        // COLLISION / TRIGGER HELPERS
+        // ============================================================
+        function rectIntersect(r1, r2) {
+        return !(r2.x > r1.x + r1.w || r2.x + r2.w < r1.x || r2.y > r1.y + r1.h || r2.y + r2.h < r1.y);
+        }
+
+        function inZone(p, zone) { return rectIntersect({x: p.x, y: p.y, w: p.w, h: p.h}, zone); }
+
+        function rectInside(rect, zone) {
+        return rect.x >= zone.x &&
+               rect.x + rect.w <= zone.x + zone.w &&
+               rect.y >= zone.y &&
+               rect.y + rect.h <= zone.y + zone.h;
+        }
+
+        function rectOnBridge(rect, bridge) {
+        if (bridge.x1 === undefined) return rectInside(rect, bridge);
+        let cx = rect.x + rect.w / 2;
+        let cy = rect.y + rect.h / 2;
+        let dx = bridge.x2 - bridge.x1;
+        let dy = bridge.y2 - bridge.y1;
+        let lenSq = dx * dx + dy * dy;
+        if (lenSq <= 0) return false;
+        let t = ((cx - bridge.x1) * dx + (cy - bridge.y1) * dy) / lenSq;
+        if (t < -0.03 || t > 1.03) return false;
+        let px = bridge.x1 + dx * t;
+        let py = bridge.y1 + dy * t;
+        let distance = Math.sqrt((cx - px) * (cx - px) + (cy - py) * (cy - py));
+        return distance <= (bridge.width || Math.max(bridge.w, bridge.h)) / 2 - 3;
+        }
+
+        function isWaterWalkable(rect) {
+        return rectInside(rect, dock) || rectInside(rect, lakeIsland) || rectOnBridge(rect, lakeBridgeA) || rectOnBridge(rect, lakeBridgeB);
+        }
+
+        function isOnDock(rect) {
+        return rectInside(rect, dock);
+        }
+
+        function canMoveTo(x, y) {
+        let nextRect = { x: x, y: y, w: player.w, h: player.h };
+
+        if (currentScene === 'outdoors') {
+          if (x < 0 || y < WORLD_TOP || x + player.w > MAP_WIDTH || y + player.h > WORLD_BOTTOM) return false;
+         for (let wall of hutWalls) if (rectIntersect(nextRect, wall)) return false;
+        if (rectIntersect(nextRect, shop)) return false;
+        if (rectIntersect(nextRect, roadSign.collision)) return false;
+         for (let tree of lakeTreeLine) if (rectIntersect(nextRect, tree)) return false;
+         for (let w of waterBlocks) if (rectIntersect(nextRect, w) && !isWaterWalkable(nextRect)) return false;
+        return true;
+
+        } else if (currentScene === 'indoors') {
+             if (x < room.x || y < room.y || x + player.w > room.x + room.w || y + player.h > room.y + room.h) {
+                if (!rectIntersect(nextRect, roomExit)) return false;
+         }
+        if (rectIntersect(nextRect, bed)) return false;
+        return true;
+
+        } else if (currentScene === 'shop') {
+            if (x < shopRoom.x || y < shopRoom.y || x + player.w > shopRoom.x + shopRoom.w || y + player.h > shopRoom.y + shopRoom.h) {
+                if (!rectIntersect(nextRect, shopExit)) return false;
+            }
+
+    // counter collision
+            if (rectIntersect(nextRect, shopCounter)) return false;
+
+            return true;
+        }
+
+        return false;
+        }
+        function getFishingProbeRect() {
+        let rodEndX = player.x; let rodEndY = player.y;
+        if (player.facing === 'left') { rodEndX -= 25; rodEndY += 5; }
+        else if (player.facing === 'right') { rodEndX += player.w + 25; rodEndY += 5; }
+        else if (player.facing === 'up') { rodEndX += 10; rodEndY -= 25; }
+        else { rodEndX += 10; rodEndY += player.h + 25; }
+
+        return { x: rodEndX - 4, y: rodEndY - 4, w: 8, h: 8 };
+        }
+
+        function getFacingWaterBiome() {
+        let bobberRect = getFishingProbeRect();
+        for(let w of waterBlocks) if(rectIntersect(bobberRect, w)) return w.biome || 'home';
+        return null;
+        }
+
+        function isFacingWater() {
+        return getFacingWaterBiome() !== null;
+        }
+
+        function addFloatingText(txt, x, y, color) { floatingTexts.push({ txt, x, y, color, life: 60 }); }
+
+        // ============================================================
+        // SHOP UI / DIALOGUE SYSTEM
+        // ============================================================
+        function getShopOptions() {
+        if (shopUI.mode === 'buy') return rodUpgrades.slice(1);
+        if (shopUI.mode === 'sell') return ['fish', 'gear'];
+        return ['Buy', 'Sell', 'Leave'];
+        }
+
+        function setShopMessage(message) {
+        shopUI.message = message;
+        shopUI.messageTimer = 180;
+        }
+
+        function openShopUI() {
+        shopUI.open = true;
+        shopUI.mode = 'main';
+        shopUI.selected = 0;
+        shopUI.message = "Welcome in! Need a better rod or selling today?";
+        shopUI.messageTimer = 0;
+        player.fishingState = 'none';
+        keys['KeyW'] = false; keys['KeyA'] = false; keys['KeyS'] = false; keys['KeyD'] = false;
+        keys['ArrowUp'] = false; keys['ArrowDown'] = false; keys['ArrowLeft'] = false; keys['ArrowRight'] = false;
+        keys['Space'] = false;
+        }
+
+        function closeShopUI() {
+        shopUI.open = false;
+        shopUI.mode = 'main';
+        shopUI.selected = 0;
+        keys['Space'] = false;
+        keys['KeyE'] = false;
+        shopUI.waitForInteractRelease = true;
+        }
+
+        function getRodStatus(rod) {
+        if (rod.level < player.rodLevel) return 'Owned';
+        if (rod.level === player.rodLevel) return 'Equipped';
+        if (rod.level === player.rodLevel + 1) return 'Available';
+        return 'Locked';
+        }
+
+        function buySelectedRod() {
+        let rod = getShopOptions()[shopUI.selected];
+        if (!rod) return;
+        let status = getRodStatus(rod);
+        if (status === 'Owned' || status === 'Equipped') {
+        setShopMessage(`${rod.name} is already yours.`);
+        return;
+        }
+        if (status === 'Locked') {
+        setShopMessage("That rod is still locked. Buy the earlier upgrade first.");
+        return;
+        }
+        if (player.money < rod.cost) {
+        setShopMessage(`You need $${rod.cost} for the ${rod.name} rod.`);
+        return;
+        }
+        player.money -= rod.cost;
+        player.rodLevel = rod.level;
+        setShopMessage(`${rod.name} rod equipped. Good fishing!`);
+        addFloatingText("UPGRADE!", player.x, player.y - 20, '#f1c40f');
+        }
+
+        function sellFishFromShopUI() {
+        let earned = player.fishBag.reduce((sum, fish) => sum + fish.value, 0);
+        if (earned <= 0 && player.fishBag.length === 0) {
+        setShopMessage("No fish in your bag right now.");
+        return;
+        }
+        player.money += earned;
+        player.fishBag = [];
+        setShopMessage(`Sold your catch for $${earned}.`);
+        addFloatingText(`+$${earned}`, player.x, player.y - 20, '#2ecc71');
+        }
+
+        function handleShopUIInput(code) {
+        if (code === 'Escape' || code === 'KeyX') {
+        if (shopUI.mode === 'main') closeShopUI();
+        else { shopUI.mode = 'main'; shopUI.selected = 0; }
+        return;
+        }
+
+        let options = getShopOptions();
+        if (code === 'ArrowUp' || code === 'KeyW') {
+        shopUI.selected = (shopUI.selected - 1 + options.length) % options.length;
+        return;
+        }
+        if (code === 'ArrowDown' || code === 'KeyS') {
+        shopUI.selected = (shopUI.selected + 1) % options.length;
+        return;
+        }
+        if (code !== 'Enter' && code !== 'Space' && code !== 'KeyE') return;
+
+        if (shopUI.mode === 'main') {
+        if (shopUI.selected === 0) { shopUI.mode = 'buy'; shopUI.selected = 0; setShopMessage("Pick a rod upgrade."); }
+        else if (shopUI.selected === 1) { shopUI.mode = 'sell'; shopUI.selected = 0; setShopMessage("What would you like to sell?"); }
+        else closeShopUI();
+        } else if (shopUI.mode === 'buy') {
+        buySelectedRod();
+        } else if (shopUI.mode === 'sell') {
+        if (shopUI.selected === 0) sellFishFromShopUI();
+        else setShopMessage("Gear selling is set up for later.");
+        }
+        }
+
+        // ============================================================
+        // GAMEPLAY UPDATE SYSTEMS
+        // ============================================================
+        function updateWorldClockAndWeather() {
+        gameTime += timeSpeed;
+        if (gameTime >= 2400) gameTime = 0;
+
+        updateRain();
+        updateAmbientLife();
+        cloudOffset += 0.2;
+        }
+
+        function updateCamera() {
+        cameraX = player.x - canvas.width / 2 + player.w / 2;
+        if (cameraX < 0) cameraX = 0;
+        if (cameraX > MAP_WIDTH - canvas.width) cameraX = MAP_WIDTH - canvas.width;
+        
+        cameraY = player.y - canvas.height / 2 + player.h / 2;
+        if (cameraY < WORLD_TOP) cameraY = WORLD_TOP; // Allow panning up to extended beach area
+        if (cameraY > WORLD_BOTTOM - canvas.height) cameraY = WORLD_BOTTOM - canvas.height;
+        }
+
+        function handleSceneTransitions() {
+        if (currentScene === 'outdoors' && inZone(player, doorZone) && !player.isDriving) {
+        currentScene = 'indoors';
+        player.x = roomExit.x + 8; player.y = roomExit.y - 30;
+        keys['KeyW'] = false; keys['ArrowUp'] = false;
+        } else if (currentScene === 'indoors' && inZone(player, roomExit)) {
+        currentScene = 'outdoors';
+        player.x = doorZone.x - 2; player.y = doorZone.y + 45;
+        keys['KeyS'] = false; keys['ArrowDown'] = false;
+        } else if (currentScene === 'outdoors' && inZone(player, shopEntry) && !player.isDriving) {
+        currentScene = 'shop';
+        player.x = shopRoom.x + shopRoom.w/2 - 12; player.y = shopRoom.y + shopRoom.h - 60;
+        keys['KeyW'] = false; keys['ArrowUp'] = false;
+        } else if (currentScene === 'shop' && inZone(player, shopExit)) {
+        currentScene = 'outdoors';
+        player.x = shopEntry.x + shopEntry.w / 2 - player.w / 2; player.y = shopEntry.y + shopEntry.h + 8;
+        keys['KeyS'] = false; keys['ArrowDown'] = false;
+        }
+        }
+
+        function updateFloatingTexts() {
+        for(let i = floatingTexts.length - 1; i >= 0; i--) {
+        floatingTexts[i].y -= 0.5;
+        floatingTexts[i].life--;
+        if(floatingTexts[i].life <= 0) floatingTexts.splice(i, 1);
+        }
+        }
+
+        function update() {
+        if (gameState === 'menu') return; // Don't update game world in menu
+        
+        if (shopUI.open) {
+        if (shopUI.messageTimer > 0) shopUI.messageTimer--;
+        return;
+        }
+
+        if (player.showInventory) return; // FREEZE GAME WORLD
+
+        updateWorldClockAndWeather();
+        updateCamera();
+        handleSceneTransitions();
+
+        if (player.fishingState === 'none') {
+        if (player.isDriving) {
+        let inputX = 0; let inputY = 0;
+        if (keys['KeyW'] || keys['ArrowUp']) inputY -= 1;
+        if (keys['KeyS'] || keys['ArrowDown']) inputY += 1;
+        if (keys['KeyA'] || keys['ArrowLeft']) inputX -= 1;
+        if (keys['KeyD'] || keys['ArrowRight']) inputX += 1;
+
+        if (inputX !== 0 && inputY !== 0) {
+        let len = Math.sqrt(inputX*inputX + inputY*inputY);
+        inputX /= len; inputY /= len;
+        }
+
+        let accel = 0.8;
+        let friction = 0.85;
+
+        truck.vx += inputX * accel; truck.vy += inputY * accel;
+        truck.vx *= friction; truck.vy *= friction;
+
+        let speed = Math.sqrt(truck.vx*truck.vx + truck.vy*truck.vy);
+        if (speed > 0.5) truck.angle = Math.atan2(truck.vy, truck.vx);
+
+        if (speed > 0.1) {
+        if (canMoveTo(player.x + truck.vx, player.y)) player.x += truck.vx; else truck.vx = 0;
+        if (canMoveTo(player.x, player.y + truck.vy)) player.y += truck.vy; else truck.vy = 0;
+        truck.x = player.x; truck.y = player.y;
+        }
+        player.isMoving = speed > 1.0;
+        player.walkTimer += speed * 0.1;
+
+        } else {
+        let dx = 0, dy = 0;
+        if (keys['KeyW'] || keys['ArrowUp']) { dy -= player.speed; player.facing = 'up'; }
+        if (keys['KeyS'] || keys['ArrowDown']) { dy += player.speed; player.facing = 'down'; }
+        if (keys['KeyA'] || keys['ArrowLeft']) { dx -= player.speed; player.facing = 'left'; }
+        if (keys['KeyD'] || keys['ArrowRight']) { dx += player.speed; player.facing = 'right'; }
+
+        if (dx !== 0 && dy !== 0) { dx *= 0.707; dy *= 0.707; }
+
+        if (dx !== 0 || dy !== 0) {
+        let walls = currentScene === 'shop' ? shopWalls : (currentScene === 'indoors' ? hutWalls : []);
+        let canMoveX = true, canMoveY = true;
+        
+        for (let wall of walls) {
+        if (player.x + dx < wall.x + wall.w && player.x + player.w + dx > wall.x &&
+            player.y < wall.y + wall.h && player.y + player.h > wall.y) {
+            if (dx > 0 && player.x + player.w + dx > wall.x) canMoveX = false;
+            if (dx < 0 && player.x + dx < wall.x + wall.w) canMoveX = false;
+            if (dy > 0 && player.y + player.h + dy > wall.y) canMoveY = false;
+            if (dy < 0 && player.y + dy < wall.y + wall.h) canMoveY = false;
+        }
+        }
+        
+        if (canMoveX && canMoveTo(player.x + dx, player.y)) player.x += dx;
+        if (canMoveY && canMoveTo(player.x, player.y + dy)) player.y += dy;
+        player.isMoving = true;
+        player.walkTimer = (player.walkTimer || 0) + 0.4;
+        } else {
+        player.isMoving = false;
+        player.walkTimer = 0;
+        }
+        }
+        }
+        else {
+        if (player.fishingState === 'waiting') {
+        player.fishingTimer--;
+        if (player.fishingTimer <= 0) {
+        player.fishingState = 'minigame';
+        player.minigameCursor = 0;
+        player.minigameDir = 1;
+
+        // THE BITE HAPPENS! Roll the dice to see what fish is on the hook.
+        player.currentFish = createCaughtFish(getRandomFish(player.rodLevel, player.currentFishingBiome));
+
+        addFloatingText("!", player.x + player.w/2, player.y - 15, '#e74c3c');
+        }
+        }
+        else if (player.fishingState === 'minigame') {
+        let rod = rodUpgrades[player.rodLevel - 1];
+        // Cursor speed is Fish Base Speed modified by Rod Multiplier
+        let speed = player.currentFish.baseSpeed * rod.speedMulti;
+
+        player.minigameCursor += speed * player.minigameDir;
+        if (player.minigameCursor > 1) { player.minigameCursor = 1; player.minigameDir = -1; }
+        if (player.minigameCursor < 0) { player.minigameCursor = 0; player.minigameDir = 1; }
+        }
+        }
+
+        updateFloatingTexts();
+        }
+
+        // ============================================================
+        // RENDER HELPERS / SPRITES
+        // ============================================================
+        // --- PROCEDURAL FISH SPRITES ---
+        function drawFishSprite(ctx, name, x, y) {
+        ctx.save();
+        ctx.translate(x, y);
+
+        if (name === 'Old Boot') {
+        ctx.fillStyle = '#7f8c8d';
+        ctx.fillRect(-6, -8, 8, 12);
+        ctx.fillRect(-6, 4, 14, 6);
+        ctx.fillStyle = '#95a5a6';
+        ctx.fillRect(-2, -8, 4, 12);
+        } else if (name === 'Minnow') {
+        ctx.fillStyle = '#bdc3c7';
+        ctx.beginPath(); ctx.ellipse(0, 0, 10, 4, 0, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(-10, 0); ctx.lineTo(-14, -4); ctx.lineTo(-14, 4); ctx.fill();
+        } else if (name === 'Trout') {
+        ctx.fillStyle = '#2ecc71';
+        ctx.beginPath(); ctx.ellipse(0, 0, 14, 6, 0, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#27ae60';
+        ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(-20, -6); ctx.lineTo(-20, 6); ctx.fill();
+        ctx.fillStyle = '#111';
+        ctx.fillRect(4, -2, 2, 2); ctx.fillRect(0, 2, 2, 2); ctx.fillRect(-4, -1, 2, 2);
+        } else if (name === 'Salmon') {
+        ctx.fillStyle = '#e74c3c';
+        ctx.beginPath(); ctx.ellipse(0, 0, 16, 7, 0, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#c0392b';
+        ctx.beginPath(); ctx.moveTo(-16, 0); ctx.lineTo(-22, -8); ctx.lineTo(-22, 8); ctx.fill();
+        ctx.fillRect(8, 2, 6, 3);
+        } else if (name === 'Catfish') {
+        ctx.fillStyle = '#34495e';
+        ctx.beginPath(); ctx.ellipse(0, 0, 18, 8, 0, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#2c3e50';
+        ctx.beginPath(); ctx.moveTo(-18, 0); ctx.lineTo(-24, -8); ctx.lineTo(-24, 8); ctx.fill();
+        ctx.strokeStyle = '#111'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(14, 2); ctx.lineTo(22, 6); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(14, 2); ctx.lineTo(22, -2); ctx.stroke();
+        } else if (name === 'Golden Koi') {
+        ctx.fillStyle = '#f1c40f';
+        ctx.beginPath(); ctx.ellipse(0, 0, 15, 8, 0, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#e67e22';
+        ctx.beginPath(); ctx.moveTo(-15, 0); ctx.quadraticCurveTo(-25, -15, -20, 0); ctx.quadraticCurveTo(-25, 15, -15, 0); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(0, -8); ctx.lineTo(-5, -14); ctx.lineTo(5, -8); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(0, 8); ctx.lineTo(-5, 14); ctx.lineTo(5, 8); ctx.fill();
+        } else {
+        let species = allFishTypes.find(f => f.name === name) || { color: '#bdc3c7' };
+        ctx.fillStyle = species.color;
+        ctx.beginPath(); ctx.ellipse(0, 0, 13, 6, 0, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
+        ctx.beginPath(); ctx.moveTo(-13, 0); ctx.lineTo(-20, -6); ctx.lineTo(-20, 6); ctx.fill();
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
+        ctx.fillRect(-2, -4, 8, 2);
+        }
+
+        if (name !== 'Old Boot') {
+        ctx.fillStyle = '#fff'; ctx.fillRect(6, -3, 3, 3);
+        ctx.fillStyle = '#000'; ctx.fillRect(7, -2, 1, 1);
+        }
+
+        ctx.restore();
+        }
+
+        function drawShadow(x, y, width, height, darkness = 0.3) {
+        // Only draw shadows during daytime
+        let hour = gameTime / 100;
+        if (hour >= 6 && hour <= 18) {
+        ctx.save();
+        ctx.fillStyle = `rgba(0, 0, 0, ${darkness})`;
+        
+        // Calculate shadow direction based on time
+        let shadowAngle = (hour - 6) / 12 * Math.PI; // 6am to 6pm
+        let shadowOffsetX = Math.cos(shadowAngle) * height * 0.4;
+        let shadowOffsetY = Math.abs(Math.sin(shadowAngle)) * height * 0.15;
+        
+        ctx.beginPath();
+        ctx.ellipse(x + width/2 + shadowOffsetX, y + height/2 + shadowOffsetY, width/2, height/3, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        }
+        }
+
+        function drawGrassArea(x, y, width, height, ambientLight) {
+        ctx.fillStyle = `rgba(126, 200, 80, ${ambientLight})`;
+        ctx.fillRect(x, y, width, height);
+
+        ctx.fillStyle = '#6ab04c';
+        for (let gx = Math.floor(x / 30) * 30; gx < x + width; gx += 30) {
+        for (let gy = Math.floor(y / 30) * 30; gy < y + height; gy += 30) {
+        let ox = (gx * 37 + gy * 17) % 25;
+        let oy = (gx * 13 + gy * 29) % 25;
+        ctx.fillRect(gx + ox, gy + oy, 2, 4);
+        ctx.fillRect(gx + ox + 2, gy + oy - 2, 2, 6);
+        }
+        }
+
+        ctx.fillStyle = '#8ed860';
+        for (let gx = Math.floor((x - 15) / 40) * 40 + 15; gx < x + width; gx += 40) {
+        for (let gy = Math.floor((y - 15) / 40) * 40 + 15; gy < y + height; gy += 40) {
+        let ox = (gx * 11 + gy * 23) % 30;
+        let oy = (gx * 19 + gy * 7) % 30;
+        ctx.fillRect(gx + ox, gy + oy, 2, 2);
+        }
+        }
+        }
+
+        function quadPoint(start, control, end, t) {
+        let mt = 1 - t;
+        return {
+        x: mt * mt * start.x + 2 * mt * t * control.x + t * t * end.x,
+        y: mt * mt * start.y + 2 * mt * t * control.y + t * t * end.y
+        };
+        }
+
+        function drawLakeBeanPath(bounds, padX = 0, padY = 0) {
+        let x = bounds.x - padX;
+        let y = bounds.y - padY;
+        let w = bounds.w + padX * 2;
+        let h = bounds.h + padY * 2;
+
+        ctx.beginPath();
+        ctx.moveTo(x + w * 0.48, y + h * 0.02);
+        ctx.bezierCurveTo(x + w * 0.64, y - h * 0.01, x + w * 0.80, y + h * 0.08, x + w * 0.88, y + h * 0.22);
+        ctx.bezierCurveTo(x + w * 0.96, y + h * 0.36, x + w * 0.88, y + h * 0.47, x + w * 0.79, y + h * 0.51);
+        ctx.bezierCurveTo(x + w * 0.94, y + h * 0.62, x + w * 0.88, y + h * 0.80, x + w * 0.73, y + h * 0.90);
+        ctx.bezierCurveTo(x + w * 0.57, y + h * 1.00, x + w * 0.38, y + h * 0.96, x + w * 0.25, y + h * 0.86);
+        ctx.bezierCurveTo(x + w * 0.08, y + h * 0.74, x + w * 0.01, y + h * 0.58, x + w * 0.06, y + h * 0.42);
+        ctx.bezierCurveTo(x + w * 0.11, y + h * 0.25, x + w * 0.24, y + h * 0.12, x + w * 0.39, y + h * 0.08);
+        ctx.bezierCurveTo(x + w * 0.42, y + h * 0.06, x + w * 0.45, y + h * 0.04, x + w * 0.48, y + h * 0.02);
+        ctx.closePath();
+        }
+
+        function drawCurvedNorthRoad() {
+        let start = { x: northRoad.startX, y: road.y - 2 };
+        let mid = { x: northRoad.bendX, y: northRoad.bendY };
+        let control = { x: northRoad.bendX + 280, y: northRoad.bendY - 95 };
+        let end = { x: northRoad.endX, y: northRoad.endY };
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, WORLD_TOP, MAP_WIDTH, road.y - WORLD_TOP);
+        ctx.clip();
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        ctx.strokeStyle = '#6b4a2f';
+        ctx.lineWidth = northRoad.width + 12;
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(mid.x, mid.y);
+        ctx.quadraticCurveTo(control.x, control.y, end.x, end.y);
+        ctx.stroke();
+
+        ctx.strokeStyle = '#a87949';
+        ctx.lineWidth = northRoad.width;
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(mid.x, mid.y);
+        ctx.quadraticCurveTo(control.x, control.y, end.x, end.y);
+        ctx.stroke();
+
+        ctx.strokeStyle = 'rgba(95, 62, 36, 0.35)';
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.moveTo(start.x - 18, start.y);
+        ctx.lineTo(mid.x - 18, mid.y);
+        ctx.quadraticCurveTo(control.x - 18, control.y, end.x - 18, end.y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(start.x + 18, start.y);
+        ctx.lineTo(mid.x + 18, mid.y);
+        ctx.quadraticCurveTo(control.x + 18, control.y, end.x + 18, end.y);
+        ctx.stroke();
+
+        ctx.fillStyle = '#7a5635';
+        for (let i = 40; i < start.y - mid.y; i += 70) {
+        ctx.beginPath();
+        ctx.arc(start.x - 24, start.y - i, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(start.x + 24, start.y - i - 20, 7, 0, Math.PI * 2);
+        ctx.fill();
+        }
+
+        ctx.fillStyle = '#d1a267';
+        for (let i = 25; i < start.y - mid.y - 15; i += 45) {
+        ctx.fillRect(start.x - 30 + (i % 4), start.y - i, 5, 4);
+        ctx.fillRect(start.x + 20 - (i % 6), start.y - i - 15, 7, 3);
+        }
+        for (let t = 0.08; t < 0.92; t += 0.13) {
+        let p = quadPoint(mid, control, end, t);
+        ctx.fillRect(p.x - 26 + (t * 30) % 10, p.y - 8, 6, 4);
+        ctx.fillRect(p.x + 14 - (t * 20) % 8, p.y + 8, 8, 3);
+        }
+
+        ctx.restore();
+        }
+
+        function drawSouthLakePath() {
+        let start = { x: southRoad.startX, y: southRoad.startY };
+        let control = { x: southRoad.controlX, y: southRoad.controlY };
+        let end = { x: southRoad.endX, y: southRoad.endY };
+        let bridgeFork = { x: lakeBridgeB.x1 - 24, y: lakeBridgeB.y1 - 12 };
+        let westFork = { x: lakeBridgeA.x1 - 22, y: lakeBridgeA.y1 + 18 };
+
+        ctx.save();
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.strokeStyle = '#6b4a2f';
+        ctx.lineWidth = southRoad.width + 10;
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.quadraticCurveTo(control.x, control.y, end.x, end.y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(end.x, end.y);
+        ctx.quadraticCurveTo(end.x - 110, end.y + 128, westFork.x, westFork.y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(end.x, end.y);
+        ctx.quadraticCurveTo(end.x + 46, end.y + 76, bridgeFork.x, bridgeFork.y);
+        ctx.stroke();
+
+        ctx.strokeStyle = '#a87949';
+        ctx.lineWidth = southRoad.width;
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.quadraticCurveTo(control.x, control.y, end.x, end.y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(end.x, end.y);
+        ctx.quadraticCurveTo(end.x - 110, end.y + 128, westFork.x, westFork.y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(end.x, end.y);
+        ctx.quadraticCurveTo(end.x + 46, end.y + 76, bridgeFork.x, bridgeFork.y);
+        ctx.stroke();
+
+        ctx.strokeStyle = 'rgba(95, 62, 36, 0.35)';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(start.x - 15, start.y);
+        ctx.quadraticCurveTo(control.x - 15, control.y, end.x - 15, end.y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(start.x + 15, start.y);
+        ctx.quadraticCurveTo(control.x + 15, control.y, end.x + 15, end.y);
+        ctx.stroke();
+
+        ctx.fillStyle = '#d1a267';
+        for (let t = 0.08; t < 0.95; t += 0.12) {
+        let p = quadPoint(start, control, end, t);
+        ctx.fillRect(p.x - 22 + (t * 37) % 12, p.y - 7, 6, 4);
+        ctx.fillRect(p.x + 11 - (t * 29) % 9, p.y + 8, 7, 3);
+        }
+        for (let t = 0.14; t < 0.92; t += 0.17) {
+        let p = quadPoint(end, { x: end.x - 110, y: end.y + 128 }, westFork, t);
+        ctx.fillRect(p.x - 16 + (t * 23) % 9, p.y - 6, 6, 4);
+        let q = quadPoint(end, { x: end.x + 46, y: end.y + 76 }, bridgeFork, t);
+        ctx.fillRect(q.x + 10 - (t * 31) % 8, q.y + 5, 6, 3);
+        }
+        ctx.restore();
+        }
+
+        function drawLakeTree(tree, index) {
+        ctx.save();
+        let sway = Math.sin(Date.now() / 820 + index * 0.7) * 1.1;
+        let trunkX = tree.x + tree.w / 2 - 4;
+        let trunkY = tree.y + tree.h - 24;
+
+        ctx.fillStyle = '#6b3f1d';
+        ctx.fillRect(trunkX, trunkY, 8, 24);
+        ctx.fillStyle = '#8a5a2b';
+        ctx.fillRect(trunkX + 2, trunkY + 3, 3, 17);
+
+        ctx.fillStyle = '#145a31';
+        ctx.beginPath();
+        ctx.moveTo(tree.x + tree.w / 2 + sway, tree.y);
+        ctx.lineTo(tree.x + tree.w - 3 + sway, tree.y + tree.h * 0.38);
+        ctx.lineTo(tree.x + 3 + sway, tree.y + tree.h * 0.38);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#1f7a3b';
+        ctx.beginPath();
+        ctx.moveTo(tree.x + tree.w / 2 - 2 + sway, tree.y + tree.h * 0.18);
+        ctx.lineTo(tree.x + tree.w + 4 + sway, tree.y + tree.h * 0.62);
+        ctx.lineTo(tree.x - 4 + sway, tree.y + tree.h * 0.62);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#0f4d2b';
+        ctx.beginPath();
+        ctx.moveTo(tree.x + tree.w / 2 + 3 + sway, tree.y + tree.h * 0.38);
+        ctx.lineTo(tree.x + tree.w + 8 + sway, tree.y + tree.h - 12);
+        ctx.lineTo(tree.x - 8 + sway, tree.y + tree.h - 12);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = 'rgba(11, 54, 31, 0.35)';
+        ctx.fillRect(tree.x + 4, tree.y + tree.h - 6, tree.w - 8, 5);
+        ctx.restore();
+        }
+
+        function drawLakeTreeLine() {
+        for (let i = 0; i < lakeTreeLine.length; i++) drawLakeTree(lakeTreeLine[i], i);
+        }
+
+        function drawLakeShore() {
+        ctx.save();
+        ctx.fillStyle = '#caa665';
+        drawLakeBeanPath(southLake, 48, 40);
+        ctx.fill();
+
+        ctx.fillStyle = '#e1bf79';
+        drawLakeBeanPath(southLake, 18, 15);
+        ctx.fill();
+
+        ctx.fillStyle = '#b99055';
+        for (let i = 0; i < 48; i++) {
+        let x = lakeShore.x + 18 + (i * 37) % (lakeShore.w - 36);
+        let y = lakeShore.y + 12 + (i * 23) % (lakeShore.h - 24);
+        ctx.fillRect(x, y, 2, 2);
+        }
+        ctx.restore();
+        }
+
+        function drawSmallWoodBridge(b) {
+        if (b.x1 !== undefined) {
+        let dx = b.x2 - b.x1;
+        let dy = b.y2 - b.y1;
+        let len = Math.sqrt(dx * dx + dy * dy);
+        let angle = Math.atan2(dy, dx);
+        let bridgeW = b.width || 42;
+
+        ctx.save();
+        ctx.translate(b.x1, b.y1);
+        ctx.rotate(angle);
+        ctx.fillStyle = '#5c2200';
+        ctx.fillRect(-4, -bridgeW / 2 - 3, len + 8, bridgeW + 6);
+        ctx.fillStyle = '#d35400';
+        for (let x = 0; x < len; x += 15) {
+        let plankH = bridgeW - 4 + ((x / 15) % 3) * 2;
+        ctx.fillRect(x, -plankH / 2 + Math.sin(x) * 1.5, 11, plankH);
+        }
+        ctx.fillStyle = '#8a3a00';
+        ctx.fillRect(0, -bridgeW / 2 + 5, len, 4);
+        ctx.fillRect(0, bridgeW / 2 - 9, len, 4);
+        ctx.restore();
+        return;
+        }
+
+        ctx.save();
+        ctx.fillStyle = '#5c2200';
+        ctx.fillRect(b.x - 3, b.y + 4, b.w + 6, b.h - 8);
+        ctx.fillStyle = '#d35400';
+        ctx.fillRect(b.x, b.y, b.w, b.h);
+        ctx.fillStyle = '#a04000';
+        for (let y = b.y + 8; y < b.y + b.h; y += 15) ctx.fillRect(b.x, y, b.w, 3);
+        ctx.fillRect(b.x + 5, b.y, 3, b.h);
+        ctx.fillRect(b.x + b.w - 8, b.y, 3, b.h);
+        ctx.restore();
+        }
+
+        function drawLakeWater(waterTime) {
+        ctx.save();
+        ctx.fillStyle = '#2e8f86';
+        drawLakeBeanPath(southLake);
+        ctx.fill();
+
+        ctx.fillStyle = 'rgba(30, 111, 105, 0.42)';
+        for (let i = 0; i < 28; i++) {
+        let x = southLake.x + 65 + (i * 89) % (southLake.w - 130);
+        let y = southLake.y + 62 + (i * 47) % (southLake.h - 120);
+        ctx.fillRect(x + Math.sin((i + waterTime) * 0.55) * 5, y, 28, 4);
+        }
+
+        ctx.fillStyle = 'rgba(219, 244, 232, 0.38)';
+        for (let i = 0; i < 22; i++) {
+        let x = southLake.x + 80 + (i * 71) % (southLake.w - 150);
+        let y = southLake.y + 45 + (i * 59) % (southLake.h - 95);
+        ctx.fillRect(x, y + Math.sin((x + waterTime * 8) * 0.05) * 2, 25, 2);
+        }
+        ctx.restore();
+        }
+
+        function drawIslandPatch(bounds, padX = 0, padY = 0) {
+        let x = bounds.x - padX;
+        let y = bounds.y - padY;
+        let w = bounds.w + padX * 2;
+        let h = bounds.h + padY * 2;
+
+        ctx.beginPath();
+        ctx.moveTo(x + w * 0.18, y + h * 0.48);
+        ctx.bezierCurveTo(x + w * 0.18, y + h * 0.24, x + w * 0.39, y + h * 0.08, x + w * 0.63, y + h * 0.13);
+        ctx.bezierCurveTo(x + w * 0.83, y + h * 0.17, x + w * 0.96, y + h * 0.34, x + w * 0.91, y + h * 0.56);
+        ctx.bezierCurveTo(x + w * 0.88, y + h * 0.76, x + w * 0.66, y + h * 0.91, x + w * 0.43, y + h * 0.87);
+        ctx.bezierCurveTo(x + w * 0.24, y + h * 0.84, x + w * 0.08, y + h * 0.70, x + w * 0.18, y + h * 0.48);
+        ctx.closePath();
+        }
+
+        function drawLakeIslandAndBridges() {
+        drawSmallWoodBridge(lakeBridgeA);
+        drawSmallWoodBridge(lakeBridgeB);
+
+        ctx.save();
+        ctx.fillStyle = '#d9b876';
+        drawIslandPatch(lakeIsland, 14, 11);
+        ctx.fill();
+        ctx.fillStyle = '#8fcf66';
+        drawIslandPatch(lakeIsland);
+        ctx.fill();
+        ctx.fillStyle = '#6ab04c';
+        for (let i = 0; i < 30; i++) {
+        ctx.fillRect(lakeIsland.x + 12 + (i * 19) % (lakeIsland.w - 24), lakeIsland.y + 10 + (i * 13) % (lakeIsland.h - 20), 2, 4);
+        }
+        ctx.fillStyle = '#7a5635';
+        ctx.fillRect(lakeIsland.x + 35, lakeIsland.y + 100, 13, 8);
+        ctx.fillRect(lakeIsland.x + 92, lakeIsland.y + 62, 16, 8);
+        ctx.fillRect(lakeIsland.x + 158, lakeIsland.y + 112, 19, 9);
+        ctx.fillRect(lakeIsland.x + 188, lakeIsland.y + 75, 11, 7);
+        drawLakeTree({ x: lakeIsland.x + 70, y: lakeIsland.y + 32, w: 38, h: 60 }, 90);
+        drawLakeTree({ x: lakeIsland.x + 122, y: lakeIsland.y + 24, w: 42, h: 66 }, 91);
+        drawLakeTree({ x: lakeIsland.x + 164, y: lakeIsland.y + 48, w: 36, h: 58 }, 92);
+        ctx.restore();
+        }
+
+        function getWaterFillColor(block) {
+        if (block.biome === 'lake') return '#2f8f8b';
+        if (block.biome === 'ocean') return '#3498db';
+        return '#3498db';
+        }
+
+        function getWaterRippleColor(block) {
+        if (block.biome === 'lake') return '#1f6f6f';
+        if (block.biome === 'ocean') return '#2980b9';
+        return '#2980b9';
+        }
+
+        function drawRoadSign(x, y) {
+        ctx.save();
+        ctx.fillStyle = '#5c3a1e';
+        ctx.fillRect(x + 31, y + 22, 8, 48);
+        ctx.fillStyle = '#3e2715';
+        ctx.fillRect(x + 34, y + 22, 2, 48);
+
+        ctx.fillStyle = '#9b6a35';
+        ctx.fillRect(x, y, 88, 22);
+        ctx.fillRect(x + 10, y + 26, 72, 20);
+        ctx.fillStyle = '#6d4c2d';
+        ctx.fillRect(x, y, 88, 3);
+        ctx.fillRect(x + 10, y + 26, 72, 3);
+
+        ctx.fillStyle = '#2c1b10';
+        ctx.font = '8px "Press Start 2P"';
+        ctx.fillText('UP Beach', x + 8, y + 15);
+        ctx.font = '7px "Press Start 2P"';
+        ctx.fillText('> Shop', x + 18, y + 40);
+        ctx.fillStyle = '#f1c40f';
+        ctx.fillRect(x + 2, y + 8, 4, 3);
+        ctx.fillRect(x + 3, y + 5, 2, 3);
+
+        ctx.fillStyle = '#3e2715';
+        ctx.fillRect(x + 5, y + 5, 3, 3);
+        ctx.fillRect(x + 78, y + 5, 3, 3);
+        ctx.fillRect(x + 15, y + 31, 3, 3);
+        ctx.fillRect(x + 70, y + 31, 3, 3);
+        ctx.restore();
+        }
+
+        function drawBeachDock() {
+        ctx.save();
+        ctx.fillStyle = '#5c2200';
+        ctx.fillRect(dock.x + 8, dock.y + 8, 6, dock.h - 4);
+        ctx.fillRect(dock.x + dock.w - 14, dock.y + 8, 6, dock.h - 4);
+
+        ctx.fillStyle = '#d35400';
+        ctx.fillRect(dock.x, dock.y, dock.w, dock.h);
+        ctx.fillStyle = '#a04000';
+        for (let y = dock.y + 8; y < dock.y + dock.h; y += 14) {
+        ctx.fillRect(dock.x, y, dock.w, 3);
+        }
+        for (let x = dock.x + 10; x < dock.x + dock.w; x += 18) {
+        ctx.fillRect(x, dock.y, 3, dock.h);
+        }
+
+        ctx.fillStyle = '#5c2200';
+        for (let y = dock.y + 10; y < dock.y + dock.h; y += 24) {
+        ctx.fillRect(dock.x - 4, y, 8, 8);
+        ctx.fillRect(dock.x + dock.w - 4, y, 8, 8);
+        }
+        ctx.restore();
+        }
+
+        function isNightTime() {
+        let hour = gameTime / 100;
+        return hour >= 19 || hour < 6;
+        }
+
+        function updateAmbientLife() {
+        if (currentScene !== 'outdoors') return;
+
+        birdSpawnTimer--;
+        if (birdSpawnTimer <= 0) {
+        let fromLeft = Math.random() < 0.5;
+        let birdYMin = WORLD_TOP + 35;
+        let birdYMax = WORLD_TOP + (canvas.height / 4);
+        let birdY = birdYMin + Math.random() * (birdYMax - birdYMin);
+        birds.push({
+        x: fromLeft ? -35 : MAP_WIDTH + 35,
+        y: birdY,
+        baseY: birdY,
+        vx: fromLeft ? 0.9 + Math.random() * 0.35 : -0.9 - Math.random() * 0.35,
+        flap: Math.random() * Math.PI * 2,
+        bob: Math.random() * Math.PI * 2,
+        scale: 0.85 + Math.random() * 0.35,
+        life: 1200
+        });
+        birdSpawnTimer = 520 + Math.random() * 520;
+        }
+
+        for (let i = birds.length - 1; i >= 0; i--) {
+        let bird = birds[i];
+        bird.x += bird.vx;
+        bird.y = bird.baseY + Math.sin(bird.bob) * 5;
+        bird.flap += 0.11;
+        bird.bob += 0.025;
+        bird.life--;
+        if (bird.life <= 0 || bird.x < -80 || bird.x > MAP_WIDTH + 80) birds.splice(i, 1);
+        }
+
+        fishJumpTimer--;
+        if (fishJumpTimer <= 0) {
+        jumpingFish.push({
+        x: dock.x - 160 + Math.random() * 360,
+        y: beach.y - 18,
+        t: 0,
+        life: 44,
+        dir: Math.random() < 0.5 ? -1 : 1
+        });
+        fishJumpTimer = 180 + Math.random() * 260;
+        }
+
+        for (let i = jumpingFish.length - 1; i >= 0; i--) {
+        jumpingFish[i].t++;
+        jumpingFish[i].life--;
+        if (jumpingFish[i].life <= 0) jumpingFish.splice(i, 1);
+        }
+        }
+
+        function drawAmbientLife() {
+        ctx.save();
+
+        for (let bird of birds) {
+        let wing = Math.sin(bird.flap) * 3 * bird.scale;
+        let dir = bird.vx >= 0 ? 1 : -1;
+        ctx.save();
+        ctx.translate(bird.x, bird.y);
+        ctx.scale(dir * bird.scale, bird.scale);
+        ctx.strokeStyle = 'rgba(44, 62, 80, 0.75)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-8, 0);
+        ctx.lineTo(0, -3 - wing);
+        ctx.lineTo(8, 0);
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(236, 240, 241, 0.8)';
+        ctx.fillRect(-1, -1, 2, 2);
+        ctx.restore();
+        }
+
+        for (let fish of jumpingFish) {
+        let progress = fish.t / 44;
+        let arc = Math.sin(progress * Math.PI) * 18;
+        let x = fish.x + progress * 36 * fish.dir;
+        let y = fish.y - arc;
+        ctx.fillStyle = '#f1c40f';
+        ctx.fillRect(x - 4, y - 2, 8, 4);
+        ctx.fillStyle = '#e67e22';
+        ctx.fillRect(x - 6 * fish.dir, y - 1, 3, 3);
+        if (fish.t < 8 || fish.t > 36) {
+        ctx.strokeStyle = 'rgba(236, 240, 241, 0.55)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.ellipse(fish.x, fish.y + 2, 8, 3, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        }
+        }
+
+        ctx.restore();
+        }
+
+        function drawDogShopkeeper(x, y, scale = 1) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.scale(scale, scale);
+
+        const fur = '#a85f2d';
+        const darkFur = '#6d3f1f';
+        const tan = '#d9b178';
+        const apron = '#3f5f3a';
+        const apronDark = '#2f472b';
+
+        // Compact body and apron
+        ctx.fillStyle = darkFur; ctx.fillRect(-17, 30, 34, 30);
+        ctx.fillStyle = fur; ctx.fillRect(-15, 27, 30, 28);
+        ctx.fillStyle = apron; ctx.fillRect(-12, 34, 24, 24);
+        ctx.fillStyle = apronDark; ctx.fillRect(-12, 34, 24, 4);
+        ctx.fillStyle = '#c9a36d'; ctx.fillRect(-2, 41, 4, 3);
+
+        // Head and floppy ears
+        ctx.fillStyle = darkFur;
+        ctx.fillRect(-21, 4, 9, 22);
+        ctx.fillRect(12, 4, 9, 22);
+        ctx.fillStyle = fur;
+        ctx.fillRect(-14, 0, 28, 24);
+        ctx.fillRect(-10, -4, 20, 6);
+        ctx.fillStyle = '#8b4c25';
+        ctx.fillRect(-19, 9, 5, 12);
+        ctx.fillRect(14, 9, 5, 12);
+
+        // Face
+        ctx.fillStyle = tan;
+        ctx.fillRect(-8, 12, 16, 10);
+        ctx.fillRect(-5, 18, 10, 6);
+        ctx.fillStyle = '#1b120b';
+        ctx.fillRect(-7, 8, 3, 3);
+        ctx.fillRect(4, 8, 3, 3);
+        ctx.fillRect(-2, 15, 4, 3);
+        ctx.fillRect(-4, 20, 2, 2);
+        ctx.fillRect(2, 20, 2, 2);
+
+        // Paws resting at counter edge
+        ctx.fillStyle = darkFur;
+        ctx.fillRect(-20, 48, 9, 8);
+        ctx.fillRect(11, 48, 9, 8);
+        ctx.fillStyle = tan;
+        ctx.fillRect(-18, 50, 5, 3);
+        ctx.fillRect(13, 50, 5, 3);
+
+        ctx.restore();
+        }
+
+        function drawDogPortrait(x, y, scale = 3) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.scale(scale, scale);
+
+        const fur = '#a85f2d';
+        const darkFur = '#6d3f1f';
+        const tan = '#d9b178';
+        const apron = '#3f5f3a';
+
+        ctx.fillStyle = darkFur; ctx.fillRect(-24, 10, 12, 30); ctx.fillRect(12, 10, 12, 30);
+        ctx.fillStyle = fur; ctx.fillRect(-18, 0, 36, 34); ctx.fillRect(-12, -8, 24, 10);
+        ctx.fillStyle = '#8b4c25'; ctx.fillRect(-22, 17, 8, 18); ctx.fillRect(14, 17, 8, 18);
+        ctx.fillStyle = tan; ctx.fillRect(-11, 16, 22, 14); ctx.fillRect(-7, 27, 14, 8);
+        ctx.fillStyle = '#1b120b'; ctx.fillRect(-8, 10, 4, 4); ctx.fillRect(4, 10, 4, 4); ctx.fillRect(-2, 21, 4, 3);
+        ctx.fillRect(-5, 30, 3, 2); ctx.fillRect(2, 30, 3, 2);
+        ctx.fillStyle = darkFur; ctx.fillRect(-20, 38, 40, 26);
+        ctx.fillStyle = apron; ctx.fillRect(-15, 43, 30, 21);
+        ctx.fillStyle = '#c9a36d'; ctx.fillRect(-3, 51, 6, 4);
+
+        ctx.restore();
+        }
+
+        function drawShopOverlay() {
+        if (!shopUI.open) return;
+
+        ctx.save();
+        ctx.fillStyle = 'rgba(10, 15, 20, 0.88)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = '#2c3e50';
+        ctx.fillRect(54, 54, canvas.width - 108, canvas.height - 108);
+        ctx.fillStyle = '#c99b66';
+        ctx.fillRect(62, 62, canvas.width - 124, canvas.height - 124);
+        ctx.fillStyle = '#6d4c2d';
+        ctx.fillRect(62, 62, canvas.width - 124, 8);
+        ctx.fillRect(62, canvas.height - 70, canvas.width - 124, 8);
+
+        ctx.fillStyle = '#f1c40f';
+        ctx.font = '16px "Press Start 2P"';
+        ctx.fillText('FISH MARKET', 292, 92);
+        ctx.fillStyle = '#2c1b10';
+        ctx.font = '9px "Press Start 2P"';
+        ctx.fillText(shopUI.message, 290, 122);
+
+        // Portrait panel
+        ctx.fillStyle = '#8b5a34';
+        ctx.fillRect(92, 102, 156, 250);
+        ctx.fillStyle = '#d9b178';
+        ctx.fillRect(100, 110, 140, 234);
+        drawDogPortrait(170, 154, 3);
+        ctx.fillStyle = '#2c1b10';
+        ctx.font = '8px "Press Start 2P"';
+        ctx.fillText('BARKLEY', 118, 320);
+        ctx.fillText('ROD & FISH', 110, 336);
+
+        let menuX = 292;
+        let menuY = 158;
+        let options = getShopOptions();
+
+        if (shopUI.mode === 'main') {
+        for (let i = 0; i < options.length; i++) {
+        drawShopMenuRow(menuX, menuY + i * 46, 360, options[i], i === shopUI.selected);
+        }
+        } else if (shopUI.mode === 'buy') {
+        ctx.fillStyle = '#2c1b10';
+        ctx.font = '8px "Press Start 2P"';
+        ctx.fillText(`Money: $${player.money}`, menuX, menuY - 20);
+        for (let i = 0; i < options.length; i++) {
+        let rod = options[i];
+        let status = getRodStatus(rod);
+        let label = `${rod.name} Rod  $${rod.cost}  ${status}`;
+        drawShopMenuRow(menuX, menuY + i * 54, 410, label, i === shopUI.selected, rod.color);
+        }
+        } else if (shopUI.mode === 'sell') {
+        let fishValue = player.fishBag.reduce((sum, fish) => sum + fish.value, 0);
+        let sellOptions = [`Sell Fish Bag  $${fishValue}`, 'Sell Old Gear  Soon'];
+        for (let i = 0; i < sellOptions.length; i++) {
+        drawShopMenuRow(menuX, menuY + i * 54, 410, sellOptions[i], i === shopUI.selected);
+        }
+        }
+
+        ctx.fillStyle = '#2c1b10';
+        ctx.font = '8px "Press Start 2P"';
+        ctx.fillText('W/S or Arrows: Choose', 292, 430);
+        ctx.fillText('Enter/E/Space: Select   Esc/X: Back', 292, 448);
+        ctx.restore();
+        }
+
+        function drawShopMenuRow(x, y, w, label, selected, swatchColor = null) {
+        ctx.fillStyle = selected ? '#f1c40f' : '#8b5a34';
+        ctx.fillRect(x, y, w, 30);
+        ctx.fillStyle = selected ? '#2c1b10' : '#f7e4b6';
+        ctx.font = '8px "Press Start 2P"';
+        ctx.fillText((selected ? '> ' : '  ') + label, x + 10, y + 20);
+        if (swatchColor) {
+        ctx.fillStyle = swatchColor;
+        ctx.fillRect(x + w - 24, y + 8, 12, 12);
+        }
+        }
+
+        // ============================================================
+        // WEATHER / AMBIENT SYSTEMS
+        // ============================================================
+        function updateRain() {
+        // Check for rain chance
+        rainTimer++;
+        if (rainTimer >= nextRainCheck) {
+        rainTimer = 0;
+        nextRainCheck = 200 + Math.random() * 400;
+        
+        // 20% chance of rain starting/stopping
+        if (Math.random() < 0.2) {
+        isRaining = !isRaining;
+        if (isRaining) {
+        rainIntensity = 0.3 + Math.random() * 0.7;
+        // Initialize raindrops
+        raindrops = [];
+        for (let i = 0; i < 100 * rainIntensity; i++) {
+        raindrops.push({
+        x: Math.random() * MAP_WIDTH,
+        y: Math.random() * canvas.height,
+        speed: 4 + Math.random() * 4,
+        length: 10 + Math.random() * 10
+        });
+        }
+        }
+        }
+        }
+        
+        // Update raindrops
+        if (isRaining) {
+        for (let drop of raindrops) {
+        drop.y += drop.speed;
+        if (drop.y > canvas.height) {
+        drop.y = -drop.length;
+        drop.x = Math.random() * MAP_WIDTH;
+        }
+        }
+        }
+        }
+
+        function drawRain() {
+        // Check if rain should be disabled in interior scenes
+        let indoorScenes = ['indoors', 'shop']; // Add future interior scenes here
+        
+        if (!isRaining || indoorScenes.includes(currentScene)) return;
+        
+        ctx.save();
+        ctx.strokeStyle = `rgba(200, 200, 255, ${rainIntensity * 0.6})`;
+        ctx.lineWidth = 1;
+        
+        for (let drop of raindrops) {
+        ctx.beginPath();
+        ctx.moveTo(drop.x - cameraX, drop.y);
+        ctx.lineTo(drop.x - cameraX - 1, drop.y + drop.length);
+        ctx.stroke();
+        }
+        ctx.restore();
+        }
+
+        function drawPickupTruck(x, y, angle, hasDriver) {
+        ctx.save();
+        ctx.translate(x + 24, y + 24);
+        ctx.rotate(angle);
+
+        if (isNightTime() && hasDriver) {
+        ctx.fillStyle = 'rgba(241, 196, 15, 0.16)';
+        ctx.beginPath();
+        ctx.moveTo(34, -14);
+        ctx.lineTo(128, -42);
+        ctx.lineTo(128, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(34, 14);
+        ctx.lineTo(128, 42);
+        ctx.lineTo(128, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = 'rgba(241, 196, 15, 0.45)';
+        ctx.fillRect(35, -18, 4, 8);
+        ctx.fillRect(35, 10, 4, 8);
+        }
+
+        ctx.fillStyle = '#111';
+        ctx.fillRect(12, -26, 18, 8); ctx.fillRect(12, 18, 18, 8);
+        ctx.fillRect(-26, -26, 18, 8); ctx.fillRect(-26, 18, 18, 8);
+
+        ctx.fillStyle = '#c0392b'; ctx.fillRect(-35, -22, 70, 44);
+        ctx.fillStyle = '#2c3e50'; ctx.fillRect(-32, -18, 30, 36);
+        ctx.fillStyle = '#e74c3c';
+        ctx.fillRect(-32, -22, 32, 4); ctx.fillRect(-32, 18, 32, 4); ctx.fillRect(-35, -22, 4, 44);
+        ctx.fillRect(2, -20, 20, 40);
+
+        ctx.fillStyle = '#3498db';
+        ctx.fillRect(18, -18, 4, 36); ctx.fillRect(2, -18, 2, 36);
+        ctx.fillRect(6, -21, 10, 3); ctx.fillRect(6, 18, 10, 3);
+
+        ctx.fillStyle = '#f1c40f'; ctx.fillRect(35, -18, 3, 8); ctx.fillRect(35, 10, 3, 8);
+        ctx.fillStyle = '#900'; ctx.fillRect(-35, -20, 3, 6); ctx.fillRect(-35, 14, 3, 6);
+
+        if (hasDriver) {
+        ctx.save();
+        ctx.translate(11, -12);
+        ctx.fillStyle = player.color; ctx.fillRect(-5, -5, 10, 10);
+        ctx.beginPath();
+        ctx.moveTo(-5, -5); ctx.lineTo(-9, -7); ctx.lineTo(-1, -5);
+        ctx.moveTo(-5, 5);  ctx.lineTo(-9, 7);  ctx.lineTo(-1, 5);
+        ctx.fill();
+        ctx.fillStyle = '#111'; ctx.fillRect(1, -4, 4, 8);
+        ctx.restore();
+        }
+        ctx.restore();
+        }
+
+        function drawMenuScreen() {
+        let gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        gradient.addColorStop(0, '#2c3e50');
+        gradient.addColorStop(1, '#34495e');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        ctx.fillStyle = '#f1c40f';
+        ctx.font = 'bold 48px "Press Start 2P"';
+        ctx.textAlign = 'center';
+        ctx.fillText('CAT FISHERMAN', canvas.width / 2, 150);
+        
+        ctx.fillStyle = '#ecf0f1';
+        ctx.font = '16px "Press Start 2P"';
+        ctx.fillText('A Fishing RPG Adventure', canvas.width / 2, 200);
+        
+        ctx.fillStyle = '#e67e22';
+        ctx.fillRect(canvas.width / 2 - 20, 250, 40, 40);
+        ctx.beginPath();
+        ctx.moveTo(canvas.width / 2 - 20, 250);
+        ctx.lineTo(canvas.width / 2 - 25, 245);
+        ctx.lineTo(canvas.width / 2 - 15, 250);
+        ctx.moveTo(canvas.width / 2 + 20, 250);
+        ctx.lineTo(canvas.width / 2 + 25, 245);
+        ctx.lineTo(canvas.width / 2 + 15, 250);
+        ctx.fill();
+        
+        ctx.strokeStyle = '#bdc3c7';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(canvas.width / 2 + 15, 270);
+        ctx.lineTo(canvas.width / 2 + 35, 250);
+        ctx.stroke();
+        
+        ctx.fillStyle = '#fff';
+        ctx.font = '20px "Press Start 2P"';
+        ctx.fillText('Press SPACE or ENTER to Start', canvas.width / 2, 350);
+        
+        ctx.font = '12px "Press Start 2P"';
+        ctx.fillStyle = '#95a5a6';
+        ctx.fillText('Move: W/A/S/D or Arrow Keys', canvas.width / 2, 420);
+        ctx.fillText('Fish: Hold SPACE near water', canvas.width / 2, 445);
+        ctx.fillText('Shop: E to sell, B to upgrade', canvas.width / 2, 470);
+        
+        ctx.textAlign = 'left';
+        }
+
+        // ============================================================
+        // MAIN DRAW / SCENE RENDERING
+        // ============================================================
+        function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+        
+        if (gameState === 'menu') {
+        drawMenuScreen();
+        ctx.restore();
+        return;
+        }
+        
+        // Calculate ambient lighting based on time with smooth transitions
+        let hour = gameTime / 100;
+        let ambientLight = 1.0;
+        let skyColor = {r: 135, g: 206, b: 235}; // Day sky
+
+        // Define time periods with smooth transitions
+        if (hour >= 0 && hour < 4) { // Late night
+        ambientLight = 0.2;
+        skyColor = {r: 10, g: 25, b: 41};
+        } else if (hour >= 4 && hour < 6) { // Dawn transition
+        let t = (hour - 4) / 2; // 0 to 1
+        ambientLight = 0.2 + t * 0.4;
+        skyColor = {
+        r: 10 + t * (255 - 10),
+        g: 25 + t * (107 - 25),
+        b: 41 + t * (53 - 41)
+        };
+        } else if (hour >= 6 && hour < 8) { // Early morning
+        let t = (hour - 6) / 2; // 0 to 1
+        ambientLight = 0.6 + t * 0.4;
+        skyColor = {
+        r: 255 + t * (135 - 255),
+        g: 107 + t * (206 - 107),
+        b: 53 + t * (235 - 53)
+        };
+        } else if (hour >= 8 && hour < 17) { // Day
+        ambientLight = 1.0;
+        skyColor = {r: 135, g: 206, b: 235};
+        } else if (hour >= 17 && hour < 19) { // Evening transition
+        let t = (hour - 17) / 2; // 0 to 1
+        ambientLight = 1.0 - t * 0.4;
+        skyColor = {
+        r: 135 - t * (135 - 255),
+        g: 206 - t * (206 - 107),
+        b: 235 - t * (235 - 53)
+        };
+        } else if (hour >= 19 && hour < 21) { // Dusk transition
+        let t = (hour - 19) / 2; // 0 to 1
+        ambientLight = 0.6 - t * 0.4;
+        skyColor = {
+        r: 255 - t * (255 - 10),
+        g: 107 - t * (107 - 25),
+        b: 53 - t * (53 - 41)
+        };
+        } else { // Late evening to night
+        ambientLight = 0.2;
+        skyColor = {r: 10, g: 25, b: 41};
+        }
+
+        // Convert RGB object to hex string
+        let skyColorHex = `rgb(${Math.floor(skyColor.r)}, ${Math.floor(skyColor.g)}, ${Math.floor(skyColor.b)})`;
+
+        // Apply ambient lighting to canvas
+        ctx.fillStyle = skyColorHex;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        if (currentScene === 'outdoors') {
+        ctx.translate(-cameraX, -cameraY);
+
+        drawGrassArea(0, WORLD_TOP, MAP_WIDTH, WORLD_BOTTOM - WORLD_TOP, ambientLight);
+
+        ctx.fillStyle = '#8d6e63'; ctx.fillRect(homeParkSpot.x, homeParkSpot.y, homeParkSpot.w, homeParkSpot.h);
+        ctx.fillStyle = '#6d4c41';
+        for(let i=0; i<8; i++) ctx.fillRect(homeParkSpot.x + 10 + i*9, homeParkSpot.y + 15 + (i%3)*10, 6, 4);
+
+        ctx.fillStyle = '#7f8c8d'; ctx.fillRect(marketLot.x, marketLot.y, marketLot.w, marketLot.h);
+        ctx.fillStyle = '#bdc3c7';
+        for(let i=100; i<500; i+=60) { ctx.fillRect(marketLot.x + 50, i, 80, 4); ctx.fillRect(marketLot.x + 50, i, 4, 40); }
+
+        // Wide shoreline sand
+        ctx.fillStyle = '#e6b86a';
+        ctx.fillRect(beach.x, beach.y, beach.w, beach.h);
+
+        // sand texture
+        for (let i = 0; i < beach.w; i += 20) {
+        for (let j = 0; j < beach.h; j += 20) {
+            ctx.fillStyle = '#f2cf8d';
+            ctx.fillRect(beach.x + i + ((i + j) % 9), beach.y + j + ((i * 3 + j) % 7), 2, 2);
+
+            ctx.fillStyle = '#d9a85f';
+            ctx.fillRect(beach.x + i + 8 + ((i + j) % 5), beach.y + j + 10 + ((i * 5 + j) % 5), 2, 2);
+
+            ctx.fillStyle = '#c7924e';
+            ctx.fillRect(beach.x + i + 14 + ((i + j) % 4), beach.y + j + 4 + ((i * 7 + j) % 6), 1, 1);
+        }
+        }
+
+        drawLakeShore();
+
+        // Main road, curved beach road, and south lake path
+        ctx.fillStyle = '#95a5a6'; ctx.fillRect(road.x, road.y, road.w, road.h);
+        drawCurvedNorthRoad();
+        drawSouthLakePath();
+        drawRoadSign(roadSign.x, roadSign.y);
+                
+        // Road edges (around dirt path)
+        ctx.fillStyle = '#7f8c8d';
+        for(let i=road.x+40; i<road.x+road.w; i+=120) {
+        ctx.beginPath(); ctx.arc(i, road.y + 30 + Math.sin(i)*20, 8 + Math.cos(i)*4, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(i+50, road.y + 80 + Math.cos(i)*30, 12 + Math.sin(i)*5, 0, Math.PI*2); ctx.fill();
+        }
+        for(let i=road.x; i<northRoad.startX - northRoad.width / 2; i+=60) {
+        if (i % 240 !== 0) { ctx.fillStyle = 'rgba(241, 196, 15, 0.4)'; ctx.fillRect(i, road.y + road.h/2 - 4, 30, 8); }
+        }
+        for(let i=northRoad.startX + northRoad.width / 2; i<road.x+road.w; i+=60) {
+        if (i % 240 !== 0) { ctx.fillStyle = 'rgba(241, 196, 15, 0.4)'; ctx.fillRect(i, road.y + road.h/2 - 4, 30, 8); }
+        }
+
+        let waterTime = Date.now() / 300;
+        for(let w of waterBlocks) {
+        if (w.biome === 'lake') continue;
+        ctx.fillStyle = getWaterFillColor(w);
+        ctx.fillRect(w.x, w.y, w.w, w.h);
+        ctx.fillStyle = getWaterRippleColor(w);
+        if (w.w > 40 && w.h > 40) {
+        ctx.fillRect(w.x + 10 + Math.sin(waterTime)*5, w.y + 10, 15, 4);
+        ctx.fillRect(w.x + 30 + Math.cos(waterTime)*5, w.y + 30, 20, 4);
+        }
+        }
+
+        // Ocean details near the visible shoreline
+        ctx.fillStyle = '#2980b9';
+        for (let x = 20; x < MAP_WIDTH; x += 90) {
+        for (let y = WORLD_TOP + 35; y < beach.y - 25; y += 72) {
+        ctx.fillRect(x + Math.sin((x + y + waterTime) * 0.04) * 8, y, 28, 4);
+        }
+        }
+        ctx.fillStyle = 'rgba(236, 240, 241, 0.75)';
+        for (let x = 0; x < MAP_WIDTH; x += 44) {
+        ctx.fillRect(x, beach.y - 2 + Math.sin((x + waterTime * 10) * 0.08) * 2, 26, 3);
+        }
+        drawBeachDock();
+        drawLakeWater(waterTime);
+        drawLakeIslandAndBridges();
+        drawLakeTreeLine();
+        drawAmbientLife();
+
+        ctx.fillStyle = '#8e44ad'; ctx.fillRect(bridge.x, bridge.y+5, bridge.w, bridge.h-10);
+        ctx.fillStyle = '#d35400'; ctx.fillRect(bridge.x, bridge.y, bridge.w, bridge.h);
+        ctx.fillStyle = '#a04000';
+        for(let i=0; i<bridge.w; i+=16) ctx.fillRect(bridge.x + i, bridge.y, 2, bridge.h);
+
+        ctx.fillStyle = '#5c2200'; for(let i=0; i<=bridge.w; i+=25) ctx.fillRect(bridge.x + i - 2, bridge.y - 6, 4, 12);
+        ctx.strokeStyle = '#e67e22'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(bridge.x, bridge.y - 4);
+        for(let i=0; i<bridge.w; i+=25) ctx.quadraticCurveTo(bridge.x + i + 12.5, bridge.y, bridge.x + i + 25, bridge.y - 4);
+        ctx.stroke();
+
+        // Simple, clean cabin
+        // Main cabin body
+        ctx.fillStyle = '#8b4513'; ctx.fillRect(hut.x, hut.y + 30, hut.w, hut.h - 30);
+        
+        // Simple horizontal log lines
+        ctx.fillStyle = '#654321';
+        ctx.fillRect(hut.x, hut.y + 45, hut.w, 3);
+        ctx.fillRect(hut.x, hut.y + 60, hut.w, 3);
+        ctx.fillRect(hut.x, hut.y + 75, hut.w, 3);
+        ctx.fillRect(hut.x, hut.y + 90, hut.w, 3);
+        
+        // Simple window
+        ctx.fillStyle = '#87ceeb'; ctx.fillRect(hut.x + 45, hut.y + 45, 30, 15);
+        
+        // Simple chimney
+        ctx.fillStyle = '#654321'; ctx.fillRect(hut.x + 85, hut.y + 5, 15, 25);
+        
+        // Door
+        ctx.fillStyle = '#111'; ctx.fillRect(doorZone.x, doorZone.y, doorZone.w, doorZone.h);
+        
+        // Roof
+        ctx.fillStyle = '#654321'; ctx.beginPath();
+        ctx.moveTo(hut.x - 10, hut.y + 30); 
+        ctx.lineTo(hut.x + hut.w / 2, hut.y - 10); 
+        ctx.lineTo(hut.x + hut.w + 10, hut.y + 30); 
+        ctx.fill();
+        
+        // Door knob
+        ctx.fillStyle = '#ffd700'; ctx.beginPath(); ctx.arc(doorZone.x + doorZone.w - 8, doorZone.y + doorZone.h/2, 2, 0, Math.PI * 2); ctx.fill();
+
+        // Draw hut shadow
+        drawShadow(hut.x, hut.y + hut.h, hut.w, 15);
+
+        // Polished Fish Market Exterior
+        // Main building structure
+        ctx.fillStyle = '#8b4513'; ctx.fillRect(shop.x, shop.y + 40, shop.w, shop.h - 40);
+        
+        // Clean wood panel texture (evenly spaced)
+        ctx.fillStyle = '#654321';
+        ctx.fillRect(shop.x, shop.y + 55, shop.w, 2);
+        ctx.fillRect(shop.x, shop.y + 75, shop.w, 2);
+        ctx.fillRect(shop.x, shop.y + 95, shop.w, 2);
+        ctx.fillRect(shop.x, shop.y + 115, shop.w, 2);
+        ctx.fillRect(shop.x, shop.y + 135, shop.w, 2);
+        
+        // Bottom trim/base
+        ctx.fillStyle = '#4a4a4a'; ctx.fillRect(shop.x - 2, shop.y + shop.h - 5, shop.w + 4, 5);
+        
+        // Centered striped awning
+        let awningWidth = shop.w - 28;
+        let awningX = shop.x + (shop.w - awningWidth) / 2;
+        let stripeWidth = 16;
+        for(let i = 0; i < awningWidth; i += stripeWidth) {
+        ctx.fillStyle = (Math.floor(i / stripeWidth) % 2 === 0) ? '#e74c3c' : '#ecf0f1';
+        ctx.fillRect(awningX + i, shop.y + 6, stripeWidth, 28);
+        }
+        
+        // Awning support posts
+        ctx.fillStyle = '#654321';
+        ctx.fillRect(awningX + 4, shop.y + 34, 4, 42);
+        ctx.fillRect(awningX + awningWidth - 8, shop.y + 34, 4, 42);
+        ctx.fillRect(shop.x + shop.w/2 - 2, shop.y + 34, 4, 42);
+        
+        // Perfectly centered FISH MARKET sign
+        let signWidth = 134;
+        let signX = shop.x + (shop.w - signWidth) / 2 - 5;
+        ctx.fillStyle = '#2c3e50'; ctx.fillRect(signX, shop.y - 30, signWidth, 22);
+        ctx.fillStyle = '#f1c40f'; ctx.font = 'bold 11px "Press Start 2P"';
+        ctx.fillText("FISH MARKET", signX + 12, shop.y - 13);
+        
+        // Symmetrical windows (perfectly balanced)
+        let windowWidth = 28;
+        let windowHeight = 22;
+        let windowY = shop.y + 60;
+        let centerDoorX = shop.x + shop.w/2;
+        
+        // Left window
+        ctx.fillStyle = '#87ceeb'; ctx.fillRect(shop.x + 28, windowY, windowWidth, windowHeight);
+        ctx.fillStyle = '#4a4a4a'; ctx.fillRect(shop.x + 30, windowY + 2, windowWidth - 4, windowHeight - 4);
+        
+        // Right window
+        ctx.fillStyle = '#87ceeb'; ctx.fillRect(shop.x + shop.w - 56, windowY, windowWidth, windowHeight);
+        ctx.fillStyle = '#4a4a4a'; ctx.fillRect(shop.x + shop.w - 54, windowY + 2, windowWidth - 4, windowHeight - 4);
+        
+        // Centered entrance door
+        let doorWidth = shopDoor.w;
+        let doorHeight = shop.h - (shopDoor.y - shop.y);
+        let doorX = shopDoor.x;
+        let doorY = shopDoor.y;
+        ctx.fillStyle = '#654321'; ctx.fillRect(doorX, doorY, doorWidth, doorHeight);
+        ctx.fillStyle = '#4a4a4a'; ctx.fillRect(doorX + 2, doorY + 2, doorWidth - 4, doorHeight - 4);
+        ctx.fillStyle = '#2c3e50'; ctx.fillRect(doorX + 8, doorY + 7, doorWidth - 16, 10);
+        ctx.fillStyle = '#6d4c41'; ctx.fillRect(shopEntry.x, shopEntry.y, shopEntry.w, 6);
+        
+        // Door handle (centered on door)
+        ctx.fillStyle = '#ffd700'; ctx.beginPath(); ctx.arc(doorX + doorWidth - 8, doorY + doorHeight/2, 2, 0, Math.PI * 2); ctx.fill();
+        
+        // Symmetrical exterior decorations
+        // Left side crate
+        ctx.fillStyle = '#8b4513'; ctx.fillRect(shop.x - 12, shop.y + 95, 18, 18);
+        ctx.fillStyle = '#654321'; ctx.fillRect(shop.x - 10, shop.y + 97, 14, 14);
+        
+        // Right side crate (mirrored)
+        ctx.fillStyle = '#8b4513'; ctx.fillRect(shop.x + shop.w - 6, shop.y + 95, 18, 18);
+        ctx.fillStyle = '#654321'; ctx.fillRect(shop.x + shop.w - 4, shop.y + 97, 14, 14);
+        
+        // Small barrel beside the doorway
+        ctx.fillStyle = '#654321'; ctx.beginPath(); ctx.arc(centerDoorX + 34, shop.y + shop.h - 8, 7, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#4a4a4a'; ctx.fillRect(centerDoorX + 26, shop.y + shop.h - 10, 16, 3);
+        
+        // Hanging fish decorations (symmetrical)
+        ctx.fillStyle = '#2ecc71'; ctx.fillRect(centerDoorX - 35, shop.y + 12, 10, 3);
+        ctx.beginPath(); ctx.arc(centerDoorX - 30, shop.y + 13, 2, 0, Math.PI * 2); ctx.fill();
+        
+        ctx.fillStyle = '#e74c3c'; ctx.fillRect(centerDoorX + 25, shop.y + 12, 10, 3);
+        ctx.beginPath(); ctx.arc(centerDoorX + 30, shop.y + 13, 2, 0, Math.PI * 2); ctx.fill();
+        
+        // Lantern (centered above door)
+        ctx.fillStyle = '#f39c12'; ctx.fillRect(centerDoorX - 3, shop.y - 8, 6, 8);
+        ctx.fillStyle = '#f1c40f'; ctx.fillRect(centerDoorX - 1, shop.y - 6, 2, 4);
+
+        // Draw shop shadow
+        drawShadow(shop.x, shop.y + shop.h, shop.w, 20);
+
+        
+        
+        let isHoldingRod = player.inventory[player.activeSlot] === 'fishing_rod';
+
+        if (isFacingWater() && player.fishingState === 'none' && !player.isDriving) {
+        ctx.fillStyle = '#fff';
+        ctx.font = '10px "Press Start 2P"';
+        if (isHoldingRod) ctx.fillText("Press SPACE to Cast", player.x - 35, player.y - 15);
+        else ctx.fillText("Equip rod to fish!", player.x - 30, player.y - 15);
+        }
+        if (player.fishingState === 'minigame') {
+        ctx.fillStyle = '#f1c40f';
+        ctx.font = '10px "Press Start 2P"';
+        ctx.fillText("SPACE to Reel!", player.x - 30, player.y + player.h + 25);
+        }
+
+        if (!player.isDriving) {
+        drawPickupTruck(truck.x, truck.y, truck.angle, false);
+        let reach = { x: player.x - 20, y: player.y - 20, w: player.w + 40, h: player.h + 40 };
+        if (rectIntersect(reach, truck)) {
+        ctx.fillStyle = '#fff'; ctx.font = '10px "Press Start 2P"'; ctx.fillText("Press F to Drive", truck.x - 20, truck.y - 15);
+        }
+        }
+
+        } else if (currentScene === 'indoors') {
+        ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#d35400'; ctx.fillRect(room.x, room.y, room.w, room.h);
+        ctx.strokeStyle = '#512e5f'; ctx.lineWidth = 12; ctx.strokeRect(room.x, room.y, room.w, room.h);
+        ctx.fillStyle = '#7ec850'; ctx.fillRect(roomExit.x, roomExit.y, roomExit.w, roomExit.h);
+        ctx.fillStyle = '#6e2c00'; ctx.fillRect(bed.x-2, bed.y-2, bed.w+4, bed.h+4);
+        ctx.fillStyle = '#3498db'; ctx.fillRect(bed.x, bed.y + 20, bed.w, bed.h - 20);
+        ctx.fillStyle = '#ecf0f1'; ctx.fillRect(bed.x + 5, bed.y + 5, bed.w - 10, 15);
+        ctx.fillStyle = '#c0392b'; ctx.fillRect(room.x + 150, room.y + 100, 100, 70);
+        ctx.fillStyle = '#e74c3c'; for(let i=0; i<100; i+=20) ctx.fillRect(room.x + 150 + i, room.y + 100, 10, 70);
+        } else if (currentScene === 'shop') {
+        // Cozy Fish Market Interior
+        ctx.fillStyle = '#2c3e50'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#c99b66'; ctx.fillRect(shopRoom.x, shopRoom.y, shopRoom.w, shopRoom.h);
+        ctx.fillStyle = '#b88755'; ctx.fillRect(shopRoom.x, shopRoom.y, shopRoom.w, 96);
+
+        // Wooden walls and floor trim
+        ctx.fillStyle = '#6d4c2d';
+        ctx.fillRect(shopRoom.x, shopRoom.y, shopRoom.w, 8);
+        ctx.fillRect(shopRoom.x, shopRoom.y + shopRoom.h - 8, shopRoom.w, 8);
+        ctx.fillRect(shopRoom.x, shopRoom.y, 8, shopRoom.h);
+        ctx.fillRect(shopRoom.x + shopRoom.w - 8, shopRoom.y, 8, shopRoom.h);
+        ctx.fillStyle = '#8b5a34';
+        for (let y = shopRoom.y + 105; y < shopRoom.y + shopRoom.h - 12; y += 28) {
+        ctx.fillRect(shopRoom.x + 8, y, shopRoom.w - 16, 2);
+        }
+
+        // Back wall sign
+        let insideSignW = 154;
+        let insideSignX = shopRoom.x + (shopRoom.w - insideSignW) / 2 - 5;
+        ctx.fillStyle = '#2c3e50'; ctx.fillRect(insideSignX, shopRoom.y + 20, insideSignW, 28);
+        ctx.fillStyle = '#f1c40f'; ctx.font = 'bold 13px "Press Start 2P"';
+        ctx.fillText("FISH MARKET", insideSignX + 12, shopRoom.y + 40);
+
+        // Wall displays
+        ctx.fillStyle = '#6d4c41';
+        ctx.fillRect(shopRoom.x + 30, shopRoom.y + 68, 118, 8);
+        ctx.fillRect(shopRoom.x + shopRoom.w - 148, shopRoom.y + 68, 118, 8);
+        ctx.fillStyle = '#2ecc71'; ctx.fillRect(shopRoom.x + 48, shopRoom.y + 58, 24, 7);
+        ctx.fillStyle = '#e74c3c'; ctx.fillRect(shopRoom.x + 92, shopRoom.y + 58, 22, 7);
+        ctx.strokeStyle = '#f1c40f'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(shopRoom.x + shopRoom.w - 124, shopRoom.y + 68); ctx.lineTo(shopRoom.x + shopRoom.w - 102, shopRoom.y + 38); ctx.stroke();
+        ctx.strokeStyle = '#3498db';
+        ctx.beginPath(); ctx.moveTo(shopRoom.x + shopRoom.w - 82, shopRoom.y + 68); ctx.lineTo(shopRoom.x + shopRoom.w - 58, shopRoom.y + 34); ctx.stroke();
+
+        // Counter and service area
+        ctx.fillStyle = '#4e342e'; ctx.fillRect(shopCounter.x, shopCounter.y, shopCounter.w, shopCounter.h);
+        ctx.fillStyle = '#6d4c41'; ctx.fillRect(shopCounter.x + 4, shopCounter.y + 4, shopCounter.w - 8, shopCounter.h - 8);
+        ctx.fillStyle = '#3e2723'; ctx.fillRect(shopCounter.x, shopCounter.y + shopCounter.h - 8, shopCounter.w, 8);
+        ctx.fillStyle = 'rgba(241, 196, 15, 0.16)'; ctx.fillRect(shopCounterArea.x, shopCounterArea.y, shopCounterArea.w, shopCounterArea.h);
+
+        // Goods on counter
+        ctx.fillStyle = '#34495e'; ctx.fillRect(shopCounter.x + shopCounter.w - 58, shopCounter.y + 18, 44, 26);
+        ctx.fillStyle = '#2c3e50'; ctx.fillRect(shopCounter.x + shopCounter.w - 54, shopCounter.y + 21, 36, 20);
+        ctx.fillStyle = '#f1c40f'; ctx.fillRect(shopCounter.x + shopCounter.w - 43, shopCounter.y + 27, 14, 5);
+        ctx.fillStyle = '#3498db'; ctx.fillRect(shopCounter.x + 28, shopCounter.y + 24, 24, 8);
+        ctx.fillStyle = '#e67e22'; ctx.fillRect(shopCounter.x + 68, shopCounter.y + 22, 22, 7);
+        ctx.fillStyle = '#2ecc71'; ctx.fillRect(shopCounter.x + 108, shopCounter.y + 25, 26, 7);
+
+        // Shopkeeper behind counter
+        let shopkeeperX = shopRoom.x + shopRoom.w / 2;
+        let shopkeeperY = shopCounter.y - 48;
+        drawDogShopkeeper(shopkeeperX, shopkeeperY, 1);
+
+        // Symmetrical cozy clutter
+        ctx.fillStyle = '#8b4513'; ctx.fillRect(shopRoom.x + 34, shopRoom.y + 202, 36, 36);
+        ctx.fillStyle = '#a05a2c'; ctx.fillRect(shopRoom.x + 38, shopRoom.y + 206, 28, 28);
+        ctx.fillStyle = '#654321'; ctx.fillRect(shopRoom.x + shopRoom.w - 70, shopRoom.y + 202, 36, 36);
+        ctx.fillStyle = '#7a4b25'; ctx.fillRect(shopRoom.x + shopRoom.w - 66, shopRoom.y + 206, 28, 28);
+        ctx.fillStyle = '#6d4c41'; ctx.beginPath(); ctx.arc(shopRoom.x + 88, shopRoom.y + 238, 10, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(shopRoom.x + shopRoom.w - 88, shopRoom.y + 238, 10, 0, Math.PI * 2); ctx.fill();
+
+        // Exit door
+        ctx.fillStyle = '#27ae60'; ctx.fillRect(shopExit.x, shopExit.y, shopExit.w, shopExit.h);
+        ctx.fillStyle = '#fff'; ctx.font = '9px "Press Start 2P"'; ctx.fillText("EXIT", shopExit.x + 6, shopExit.y + 14);
+
+        if (inZone(player, shopCounterArea)) {
+        ctx.fillStyle = 'rgba(241, 196, 15, 0.18)';
+        ctx.fillRect(shopCounterArea.x, shopCounterArea.y, shopCounterArea.w, shopCounterArea.h);
+        }
+        }
+
+        let isHoldingRod = player.inventory[player.activeSlot] === 'fishing_rod';
+        let rodInfo = rodUpgrades[player.rodLevel - 1];
+
+        if (player.isDriving && currentScene === 'outdoors') {
+        drawPickupTruck(player.x, player.y, truck.angle, true);
+        } else {
+        let bounce = player.isMoving ? Math.abs(Math.sin(player.walkTimer)) * 3 : 0;
+        let drawY = player.y - bounce;
+
+        ctx.fillStyle = '#a04000';
+        let p1X = player.x + 4, p1Y = player.y + player.h - 2;
+        let p2X = player.x + player.w - 8, p2Y = player.y + player.h - 2;
+        if (player.isMoving) {
+        let stride = Math.sin(player.walkTimer) * 4;
+        if (player.facing === 'up' || player.facing === 'down') { p1Y += stride; p2Y -= stride; }
+        else if (player.facing === 'right') { p1X += stride; p2X -= stride; }
+        else if (player.facing === 'left') { p1X -= stride; p2X += stride; }
+        }
+        ctx.fillRect(p1X, p1Y, 4, 6); ctx.fillRect(p2X, p2Y, 4, 6);
+
+        ctx.fillStyle = player.color; ctx.fillRect(player.x, drawY, player.w, player.h);
+        ctx.beginPath();
+        if(player.facing === 'up' || player.facing === 'down') {
+        ctx.moveTo(player.x, drawY); ctx.lineTo(player.x + 6, drawY - 6); ctx.lineTo(player.x + 12, drawY);
+        ctx.moveTo(player.x + player.w, drawY); ctx.lineTo(player.x + player.w - 6, drawY - 6); ctx.lineTo(player.x + player.w - 12, drawY);
+        } else {
+        ctx.moveTo(player.x + 5, drawY); ctx.lineTo(player.x + 10, drawY - 6); ctx.lineTo(player.x + 15, drawY);
+        }
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        if(player.facing === 'down') {
+        ctx.fillRect(player.x + 4, drawY + 6, 4, 4); ctx.fillRect(player.x + 16, drawY + 6, 4, 4);
+        ctx.fillStyle = '#000'; ctx.fillRect(player.x + 5, drawY + 7, 2, 2); ctx.fillRect(player.x + 17, drawY + 7, 2, 2);
+        } else if(player.facing === 'right') {
+        ctx.fillRect(player.x + 14, drawY + 6, 4, 4); ctx.fillStyle = '#000'; ctx.fillRect(player.x + 16, drawY + 7, 2, 2);
+        } else if(player.facing === 'left') {
+        ctx.fillRect(player.x + 6, drawY + 6, 4, 4); ctx.fillStyle = '#000'; ctx.fillRect(player.x + 6, drawY + 7, 2, 2);
+        }
+
+        ctx.fillStyle = '#d35400';
+        let h1X, h1Y, h2X, h2Y;
+        if(player.facing === 'down') {
+        h1X = player.x + 2; h1Y = drawY + 14; h2X = player.x + player.w - 6; h2Y = drawY + 14;
+        ctx.fillRect(h1X, h1Y, 4, 4); ctx.fillRect(h2X, h2Y, 4, 4);
+        } else if(player.facing === 'up') {
+        h1X = player.x + 2; h1Y = drawY + 12; h2X = player.x + player.w - 6; h2Y = drawY + 12;
+        } else if(player.facing === 'right') {
+        h1X = player.x + player.w - 4; h1Y = drawY + 14; ctx.fillRect(h1X, h1Y, 4, 4);
+        } else if(player.facing === 'left') {
+        h1X = player.x; h1Y = drawY + 14; ctx.fillRect(h1X, h1Y, 4, 4);
+        }
+
+        if (isHoldingRod && player.fishingState === 'none') {
+        ctx.strokeStyle = rodInfo.color; ctx.lineWidth = 2; ctx.beginPath();
+        let startX = (player.facing === 'left') ? h1X + 2 : (player.facing === 'down') ? h2X + 2 : h1X + 2;
+        let startY = h1Y + 2;
+        let endX = (player.facing === 'left') ? startX - 10 : startX + 10;
+        let endY = startY - 20;
+        ctx.moveTo(startX, startY); ctx.lineTo(endX, endY); ctx.stroke();
+        }
+
+        if (player.fishingState !== 'none' && currentScene === 'outdoors') {
+        ctx.strokeStyle = rodInfo.color; ctx.lineWidth = 3; ctx.beginPath();
+
+        let rodEndX = player.x; let rodEndY = player.y;
+        let animTime = Date.now();
+        let bobOffset = 0;
+        if (player.fishingState === 'waiting') bobOffset = Math.sin(animTime / 200) * 3;
+        else if (player.fishingState === 'minigame') bobOffset = Math.sin(animTime / 40) * 6;
+
+        if (player.facing === 'left') { rodEndX -= 25; rodEndY += 5 + bobOffset; }
+        else if (player.facing === 'right') { rodEndX += player.w + 25; rodEndY += 5 + bobOffset; }
+        else if (player.facing === 'up') { rodEndX += 10 + bobOffset; rodEndY -= 25; }
+        else { rodEndX += 10 + bobOffset; rodEndY += player.h + 25; }
+
+        ctx.moveTo(player.x + player.w/2, player.y + player.h/2);
+        ctx.quadraticCurveTo(player.x + player.w/2, rodEndY - 15, rodEndX, rodEndY);
+        ctx.stroke();
+
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)'; ctx.lineWidth = 1; ctx.beginPath();
+        ctx.ellipse(rodEndX, rodEndY + 2, 6 + (bobOffset/3), 3, 0, 0, Math.PI*2); ctx.stroke();
+        ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.arc(rodEndX, rodEndY, 4, 0, Math.PI * 2); ctx.fill();
+
+        if (player.fishingState === 'minigame') {
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(rodEndX - 6 + Math.random()*4, rodEndY - 8 + Math.random()*4, 2, 2);
+        ctx.fillRect(rodEndX + 2 + Math.random()*4, rodEndY - 6 + Math.random()*4, 2, 2);
+
+        let barW = 80;
+        let barH = 12;
+        let barX = player.x + player.w/2 - barW/2;
+        let barY = player.y - 45;
+
+        ctx.fillStyle = '#000';
+        ctx.fillRect(barX - 2, barY - 2, barW + 4, barH + 4);
+
+        // The sweet spot dynamically calculates based on Fish Base Spot * Rod Multiplier
+        let sweetSpot = player.currentFish.baseSpot * rodInfo.spotMulti;
+        if (sweetSpot > 0.95) sweetSpot = 0.95;
+
+        let ssW = barW * sweetSpot;
+        let ssX = barX + (barW/2) - (ssW/2);
+        ctx.fillStyle = '#2ecc71';
+        ctx.fillRect(ssX, barY, ssW, barH);
+
+        let cursorX = barX + (player.minigameCursor * barW);
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(cursorX - 2, barY - 4, 4, barH + 8);
+        }
+        }
+        }
+
+        // Draw player shadow
+        if (!player.isDriving && currentScene === 'outdoors') {
+        drawShadow(player.x, player.y + player.h, player.w, player.h * 0.3);
+        }
+
+        if (currentScene === 'outdoors') {
+        ctx.fillStyle = '#5c2200'; for(let i=0; i<=bridge.w; i+=25) ctx.fillRect(bridge.x + i - 2, bridge.y + bridge.h - 6, 4, 12);
+        ctx.strokeStyle = '#e67e22'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(bridge.x, bridge.y + bridge.h - 4);
+        for(let i=0; i<bridge.w; i+=25) ctx.quadraticCurveTo(bridge.x + i + 12.5, bridge.y + bridge.h, bridge.x + i + 25, bridge.y + bridge.h - 4);
+        ctx.stroke();
+        }
+
+        // Draw rain effects
+        drawRain();
+
+        for(let ft of floatingTexts) {
+        ctx.fillStyle = ft.color; ctx.font = '10px "Press Start 2P"'; ctx.fillText(ft.txt, ft.x, ft.y);
+        }
+
+        ctx.restore();
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(10, 10, 260, 80);
+        ctx.fillStyle = '#fff'; ctx.font = '12px "Press Start 2P"';
+        ctx.fillText(`Bag:   ${player.fishBag.length} Items [I]`, 25, 35);
+        ctx.fillStyle = '#f1c40f'; ctx.fillText(`Money: $${player.money}`, 25, 55);
+        ctx.fillStyle = rodInfo.color; ctx.fillText(`Rod:   ${rodInfo.name}`, 25, 75);
+
+        // Time and weather display
+        ctx.fillStyle = '#fff'; ctx.font = '10px "Press Start 2P"';
+        let timeString = `${Math.floor(hour).toString().padStart(2, '0')}:${Math.floor((hour % 1) * 60).toString().padStart(2, '0')}`;
+        ctx.fillText(`Time: ${timeString}`, canvas.width - 150, 35);
+
+        if (isRaining) {
+        ctx.fillStyle = '#3498db';
+        ctx.fillText('RAINING', canvas.width - 150, 55);
+        }
+
+        let barW = 126; let barH = 46;
+        let barX = (canvas.width - barW) / 2; let barY = canvas.height - barH - 20;
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; ctx.fillRect(barX, barY, barW, barH);
+
+        for (let i = 0; i < 3; i++) {
+        let slotX = barX + 5 + (i * 40);
+        if (player.activeSlot === i) {
+        ctx.fillStyle = 'rgba(241, 196, 15, 0.4)'; ctx.fillRect(slotX, barY + 5, 36, 36);
+        ctx.strokeStyle = '#f1c40f'; ctx.lineWidth = 2;
+        } else {
+        ctx.strokeStyle = '#7f8c8d'; ctx.lineWidth = 1;
+        }
+        ctx.strokeRect(slotX, barY + 5, 36, 36);
+        ctx.fillStyle = '#fff'; ctx.font = '8px "Press Start 2P"'; ctx.fillText(i + 1, slotX + 4, barY + 15);
+
+        if (player.inventory[i] === 'fishing_rod') {
+        ctx.strokeStyle = rodInfo.color; ctx.lineWidth = 3; ctx.beginPath();
+        ctx.moveTo(slotX + 8, barY + 35); ctx.lineTo(slotX + 28, barY + 12); ctx.stroke();
+        }
+        }
+
+        if (player.isDriving) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; ctx.fillRect(canvas.width - 200, 10, 180, 40);
+        ctx.fillStyle = '#fff'; ctx.font = '10px "Press Start 2P"'; ctx.fillText("Press F to Exit", canvas.width - 185, 35);
+        }
+
+        // --- INVENTORY OVERLAY DRAWING ---
+        if (player.showInventory) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+        ctx.fillRect(100, 50, canvas.width - 200, canvas.height - 100);
+
+        ctx.fillStyle = '#f1c40f';
+        ctx.font = '16px "Press Start 2P"';
+        ctx.fillText("FISH BAG", canvas.width / 2 - 60, 90);
+
+        let startX = 145; let startY = 120;
+        let slotSize = 40; let padding = 10; let cols = 10;
+
+        for (let i = 0; i < 40; i++) {
+        let col = i % cols;
+        let row = Math.floor(i / cols);
+        let x = startX + col * (slotSize + padding);
+        let y = startY + row * (slotSize + padding);
+
+        ctx.fillStyle = '#34495e'; ctx.fillRect(x, y, slotSize, slotSize);
+        ctx.strokeStyle = '#2c3e50'; ctx.lineWidth = 2; ctx.strokeRect(x, y, slotSize, slotSize);
+
+        if (i < player.fishBag.length) {
+        drawFishSprite(ctx, player.fishBag[i].name, x + slotSize/2, y + slotSize/2);
+        }
+        }
+
+        ctx.fillStyle = '#fff';
+        ctx.font = '10px "Press Start 2P"';
+        let totalValue = player.fishBag.reduce((sum, fish) => sum + fish.value, 0);
+        ctx.fillText(`Total Value: $${totalValue}`, 145, canvas.height - 75);
+        ctx.fillText(`Press I to Close`, canvas.width - 275, canvas.height - 75);
+        }
+
+        drawShopOverlay();
+        }
+
+        // ============================================================
+        // MAIN LOOP / INITIALIZATION
+        // ============================================================
+        function init() {
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('keyup', handleKeyUp);
+        loop();
+        }
+
+        function loop() {
+        update();
+        draw();
+        requestAnimationFrame(loop);
+        }
+
+        init();
+    </script>
+  
+</body>
+</html>
