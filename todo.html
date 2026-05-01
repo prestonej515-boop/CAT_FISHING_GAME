@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>To-Do</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #f5f5f7;
+    --surface: #ffffff;
+    --surface2: #f0f0f5;
+    --border: #e0e0e8;
+    --text: #1a1a2e;
+    --text-muted: #8888aa;
+    --accent: #5b7ef5;
+    --accent-hover: #4a6de4;
+    --danger: #e05555;
+    --done-color: #aaaacc;
+    --shadow: 0 4px 24px rgba(0,0,0,0.08);
+    --radius: 12px;
+    --transition: 200ms ease;
+  }
+
+  [data-theme="dark"] {
+    --bg: #13131f;
+    --surface: #1e1e30;
+    --surface2: #252538;
+    --border: #2e2e48;
+    --text: #e8e8f8;
+    --text-muted: #5555aa;
+    --accent: #7b9af7;
+    --accent-hover: #91a9f8;
+    --danger: #e06666;
+    --done-color: #44446a;
+    --shadow: 0 4px 24px rgba(0,0,0,0.4);
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 16px 80px;
+    transition: background var(--transition), color var(--transition);
+  }
+
+  header {
+    width: 100%;
+    max-width: 560px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 28px;
+  }
+
+  h1 {
+    font-size: 1.6rem;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    color: var(--text);
+  }
+
+  /* Dark mode toggle */
+  #theme-btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background var(--transition), border var(--transition);
+    color: var(--text);
+  }
+  #theme-btn:hover { background: var(--border); }
+  #theme-btn svg { width: 18px; height: 18px; }
+
+  /* Storage warning */
+  #storage-warning {
+    display: none;
+    width: 100%;
+    max-width: 560px;
+    background: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffc107;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 0.85rem;
+    margin-bottom: 16px;
+  }
+  [data-theme="dark"] #storage-warning {
+    background: #3a2e00;
+    color: #ffd966;
+    border-color: #a07800;
+  }
+
+  /* Main card */
+  .card {
+    width: 100%;
+    max-width: 560px;
+    background: var(--surface);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    transition: background var(--transition), box-shadow var(--transition);
+  }
+
+  /* Add input area */
+  .add-area {
+    display: flex;
+    align-items: center;
+    padding: 16px;
+    gap: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  #task-input {
+    flex: 1;
+    border: none;
+    outline: none;
+    background: transparent;
+    font-size: 1rem;
+    color: var(--text);
+    font-family: inherit;
+  }
+  #task-input::placeholder { color: var(--text-muted); }
+
+  #char-count {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    min-width: 36px;
+    text-align: right;
+    transition: color var(--transition);
+  }
+  #char-count.warn { color: #e09a30; }
+  #char-count.danger { color: var(--danger); }
+
+  #add-btn {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 7px 16px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background var(--transition), opacity var(--transition);
+    white-space: nowrap;
+  }
+  #add-btn:hover { background: var(--accent-hover); }
+  #add-btn:active { opacity: 0.8; }
+
+  /* Task list */
+  #task-list {
+    list-style: none;
+    min-height: 60px;
+  }
+
+  /* Empty state */
+  #empty-state {
+    display: none;
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-muted);
+    font-size: 0.95rem;
+  }
+
+  /* Task item */
+  .task-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--border);
+    animation: slideIn 200ms ease forwards;
+    transition: background var(--transition);
+  }
+  .task-item:last-child { border-bottom: none; }
+  .task-item:hover { background: var(--surface2); }
+  .task-item.removing {
+    animation: slideOut 200ms ease forwards;
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes slideOut {
+    from { opacity: 1; transform: translateX(0); max-height: 60px; }
+    to   { opacity: 0; transform: translateX(12px); max-height: 0; padding: 0 16px; }
+  }
+
+  /* Custom checkbox */
+  .task-check {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+    border: 2px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    position: relative;
+    transition: border-color var(--transition), background var(--transition);
+  }
+  .task-check:checked {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .task-check:checked::after {
+    content: "";
+    position: absolute;
+    left: 4px;
+    top: 1px;
+    width: 6px;
+    height: 10px;
+    border: 2px solid #fff;
+    border-top: none;
+    border-left: none;
+    transform: rotate(45deg);
+  }
+  .task-check:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* Task label / edit */
+  .task-label {
+    flex: 1;
+    font-size: 0.97rem;
+    line-height: 1.4;
+    cursor: text;
+    word-break: break-word;
+    transition: color var(--transition), text-decoration var(--transition), opacity var(--transition);
+  }
+  .task-item.done .task-label {
+    text-decoration: line-through;
+    color: var(--done-color);
+    opacity: 0.7;
+  }
+
+  .task-edit-input {
+    flex: 1;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-size: 0.97rem;
+    font-family: inherit;
+    background: var(--surface);
+    color: var(--text);
+    outline: none;
+  }
+
+  /* Delete button */
+  .task-del {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    opacity: 0;
+    padding: 4px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    transition: opacity var(--transition), color var(--transition), background var(--transition);
+  }
+  .task-item:hover .task-del { opacity: 1; }
+  .task-del:hover { color: var(--danger); background: var(--surface2); }
+  .task-del:focus { opacity: 1; outline: 2px solid var(--accent); outline-offset: 2px; }
+  .task-del svg { width: 16px; height: 16px; }
+
+  /* Footer toolbar */
+  .footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    flex-wrap: wrap;
+    gap: 8px;
+    background: var(--surface2);
+    transition: background var(--transition);
+  }
+
+  #items-left { min-width: 80px; }
+
+  /* Filter buttons */
+  .filters {
+    display: flex;
+    gap: 2px;
+    background: var(--border);
+    border-radius: 8px;
+    padding: 3px;
+  }
+  .filter-btn {
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-family: inherit;
+    transition: background var(--transition), color var(--transition);
+  }
+  .filter-btn.active {
+    background: var(--surface);
+    color: var(--text);
+    font-weight: 600;
+  }
+  .filter-btn:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  #clear-btn {
+    background: none;
+    border: none;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-family: inherit;
+    padding: 4px 6px;
+    border-radius: 6px;
+    transition: color var(--transition), background var(--transition);
+    min-width: 80px;
+    text-align: right;
+  }
+  #clear-btn:hover { color: var(--danger); background: var(--surface); }
+  #clear-btn:disabled { opacity: 0.35; pointer-events: none; }
+  #clear-btn:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  @media (max-width: 400px) {
+    .footer { justify-content: center; }
+    #items-left, #clear-btn { min-width: unset; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>To-Do</h1>
+  <button id="theme-btn" aria-label="Toggle dark mode" title="Toggle dark mode">
+    <!-- Sun icon (shown in dark mode) -->
+    <svg id="icon-sun" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="5"/>
+      <line x1="12" y1="1" x2="12" y2="3"/>
+      <line x1="12" y1="21" x2="12" y2="23"/>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+      <line x1="1" y1="12" x2="3" y2="12"/>
+      <line x1="21" y1="12" x2="23" y2="12"/>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+    </svg>
+    <!-- Moon icon (shown in light mode) -->
+    <svg id="icon-moon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+    </svg>
+  </button>
+</header>
+
+<div id="storage-warning" role="alert">
+  ⚠️ localStorage is unavailable — tasks won't be saved between sessions.
+</div>
+
+<div class="card" role="main">
+  <div class="add-area">
+    <input
+      type="text"
+      id="task-input"
+      placeholder="Add a new task…"
+      maxlength="200"
+      autocomplete="off"
+      aria-label="New task"
+    />
+    <span id="char-count" aria-live="polite" aria-label="Character count"></span>
+    <button id="add-btn" aria-label="Add task">Add</button>
+  </div>
+
+  <ul id="task-list" aria-label="Task list"></ul>
+  <p id="empty-state" aria-live="polite">Nothing to do — add a task to get started</p>
+</div>
+
+<div class="card footer" role="toolbar" aria-label="Task filters">
+  <span id="items-left" aria-live="polite">0 items left</span>
+  <div class="filters" role="group" aria-label="Filter tasks">
+    <button class="filter-btn active" data-filter="all">All</button>
+    <button class="filter-btn" data-filter="active">Active</button>
+    <button class="filter-btn" data-filter="completed">Completed</button>
+  </div>
+  <button id="clear-btn" disabled>Clear done</button>
+</div>
+
+<script>
+  // ── Storage helpers ──────────────────────────────────────────────────────────
+  let storageOk = true;
+  (function checkStorage() {
+    try {
+      const k = '__ls_test__';
+      localStorage.setItem(k, '1');
+      localStorage.removeItem(k);
+    } catch {
+      storageOk = false;
+      document.getElementById('storage-warning').style.display = 'block';
+    }
+  })();
+
+  function save(key, value) {
+    if (!storageOk) return;
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch (e) {
+      // Full or blocked — surface warning once
+      document.getElementById('storage-warning').style.display = 'block';
+    }
+  }
+
+  function load(key, fallback) {
+    if (!storageOk) return fallback;
+    try {
+      const raw = localStorage.getItem(key);
+      return raw !== null ? JSON.parse(raw) : fallback;
+    } catch { return fallback; }
+  }
+
+  // ── State ────────────────────────────────────────────────────────────────────
+  let tasks = load('tasks', []);    // [{ id, text, done }]
+  let filter = load('filter', 'all');
+  let theme  = load('theme', 'light');
+
+  // Guard against duplicate IDs if state is somehow corrupted
+  const seenIds = new Set(tasks.map(t => t.id));
+
+  function uniqueId() {
+    let id;
+    do { id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+    while (seenIds.has(id));
+    seenIds.add(id);
+    return id;
+  }
+
+  // ── Theme ────────────────────────────────────────────────────────────────────
+  const themeBtn = document.getElementById('theme-btn');
+  const iconSun  = document.getElementById('icon-sun');
+  const iconMoon = document.getElementById('icon-moon');
+
+  function applyTheme(t) {
+    document.documentElement.setAttribute('data-theme', t);
+    iconSun.style.display  = t === 'dark' ? 'block' : 'none';
+    iconMoon.style.display = t === 'dark' ? 'none'  : 'block';
+  }
+
+  applyTheme(theme);
+  themeBtn.addEventListener('click', () => {
+    theme = theme === 'light' ? 'dark' : 'light';
+    applyTheme(theme);
+    save('theme', theme);
+  });
+
+  // ── DOM refs ─────────────────────────────────────────────────────────────────
+  const input      = document.getElementById('task-input');
+  const charCount  = document.getElementById('char-count');
+  const addBtn     = document.getElementById('add-btn');
+  const list       = document.getElementById('task-list');
+  const emptyState = document.getElementById('empty-state');
+  const itemsLeft  = document.getElementById('items-left');
+  const clearBtn   = document.getElementById('clear-btn');
+  const filterBtns = document.querySelectorAll('.filter-btn');
+
+  // ── Character counter ────────────────────────────────────────────────────────
+  input.addEventListener('input', () => {
+    const len = input.value.length;
+    if (len >= 160) {
+      charCount.textContent = `${len}/200`;
+      charCount.className = len >= 190 ? 'danger' : 'warn';
+    } else {
+      charCount.textContent = '';
+      charCount.className = '';
+    }
+  });
+
+  // ── Add task ─────────────────────────────────────────────────────────────────
+  function addTask() {
+    const text = input.value.trim();
+    if (!text) return;
+    const task = { id: uniqueId(), text, done: false };
+    tasks.push(task);
+    save('tasks', tasks);
+    input.value = '';
+    charCount.textContent = '';
+    charCount.className = '';
+    renderTask(task, true);
+    updateFooter();
+  }
+
+  addBtn.addEventListener('click', addTask);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') addTask(); });
+
+  // ── Render a single task item ─────────────────────────────────────────────────
+  function renderTask(task, animate = false) {
+    const li = document.createElement('li');
+    li.className = 'task-item' + (task.done ? ' done' : '');
+    li.dataset.id = task.id;
+    if (!isVisible(task)) li.style.display = 'none';
+
+    // Checkbox
+    const check = document.createElement('input');
+    check.type = 'checkbox';
+    check.className = 'task-check';
+    check.checked = task.done;
+    check.setAttribute('aria-label', `Mark "${task.text}" complete`);
+    check.addEventListener('change', () => toggleTask(task.id, check.checked, li));
+
+    // Label
+    const label = document.createElement('span');
+    label.className = 'task-label';
+    label.textContent = task.text;
+    label.title = 'Double-click to edit';
+    label.addEventListener('dblclick', () => startEdit(task, li, label));
+
+    // Delete button
+    const del = document.createElement('button');
+    del.className = 'task-del';
+    del.setAttribute('aria-label', `Delete "${task.text}"`);
+    del.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+    del.addEventListener('click', () => deleteTask(task.id, li));
+
+    li.append(check, label, del);
+    list.appendChild(li);
+
+    // Suppress animation class if re-rendering the full list
+    if (!animate) li.style.animation = 'none';
+
+    updateEmptyState();
+  }
+
+  // ── Toggle complete ───────────────────────────────────────────────────────────
+  function toggleTask(id, done, li) {
+    const task = tasks.find(t => t.id === id);
+    if (!task) return;
+    task.done = done;
+    save('tasks', tasks);
+    li.classList.toggle('done', done);
+    updateFooter();
+    // Hide if filter doesn't match
+    if (!isVisible(task)) {
+      li.style.transition = 'opacity 200ms';
+      li.style.opacity = '0';
+      setTimeout(() => { li.style.display = 'none'; li.style.opacity = ''; updateEmptyState(); }, 200);
+    }
+  }
+
+  // ── Inline edit ───────────────────────────────────────────────────────────────
+  function startEdit(task, li, label) {
+    if (li.querySelector('.task-edit-input')) return; // already editing
+
+    const editInput = document.createElement('input');
+    editInput.type = 'text';
+    editInput.className = 'task-edit-input';
+    editInput.value = task.text;
+    editInput.maxLength = 200;
+    editInput.setAttribute('aria-label', 'Edit task');
+
+    label.replaceWith(editInput);
+    editInput.focus();
+    editInput.select();
+
+    function commit() {
+      const val = editInput.value.trim();
+      if (val && val !== task.text) {
+        task.text = val;
+        save('tasks', tasks);
+      }
+      label.textContent = task.text;
+      editInput.replaceWith(label);
+    }
+
+    function cancel() {
+      editInput.replaceWith(label);
+    }
+
+    editInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
+      if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    });
+    editInput.addEventListener('blur', commit);
+  }
+
+  // ── Delete ───────────────────────────────────────────────────────────────────
+  function deleteTask(id, li) {
+    li.classList.add('removing');
+    li.addEventListener('animationend', () => {
+      li.remove();
+      tasks = tasks.filter(t => t.id !== id);
+      seenIds.delete(id);
+      save('tasks', tasks);
+      updateFooter();
+      updateEmptyState();
+    }, { once: true });
+  }
+
+  // ── Filters ──────────────────────────────────────────────────────────────────
+  function isVisible(task) {
+    if (filter === 'all') return true;
+    if (filter === 'active') return !task.done;
+    if (filter === 'completed') return task.done;
+  }
+
+  filterBtns.forEach(btn => {
+    if (btn.dataset.filter === filter) btn.classList.add('active');
+    else btn.classList.remove('active');
+
+    btn.addEventListener('click', () => {
+      filter = btn.dataset.filter;
+      save('filter', filter);
+      filterBtns.forEach(b => b.classList.toggle('active', b === btn));
+      applyFilter();
+    });
+  });
+
+  function applyFilter() {
+    list.querySelectorAll('.task-item').forEach(li => {
+      const task = tasks.find(t => t.id === li.dataset.id);
+      if (!task) return;
+      li.style.display = isVisible(task) ? '' : 'none';
+    });
+    updateEmptyState();
+  }
+
+  // ── Clear completed ───────────────────────────────────────────────────────────
+  clearBtn.addEventListener('click', () => {
+    list.querySelectorAll('.task-item.done').forEach(li => deleteTask(li.dataset.id, li));
+  });
+
+  // ── Footer / counters ─────────────────────────────────────────────────────────
+  function updateFooter() {
+    const active = tasks.filter(t => !t.done).length;
+    itemsLeft.textContent = `${active} item${active !== 1 ? 's' : ''} left`;
+    const hasDone = tasks.some(t => t.done);
+    clearBtn.disabled = !hasDone;
+  }
+
+  function updateEmptyState() {
+    const visible = [...list.querySelectorAll('.task-item')]
+      .filter(li => li.style.display !== 'none').length;
+    emptyState.style.display = visible === 0 ? 'block' : 'none';
+  }
+
+  // ── Initial render ───────────────────────────────────────────────────────────
+  tasks.forEach(task => renderTask(task, false));
+  applyFilter();
+  updateFooter();
+  updateEmptyState();
+  input.focus();
+</script>
+</body>
+</html>
