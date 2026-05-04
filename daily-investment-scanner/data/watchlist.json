@@ -1,0 +1,8 @@
+{
+  "_comment": "Add tickers you always want tracked in the daily report. Remove this comment key if your JSON parser is strict.",
+  "tickers": [
+    "MSFT",
+    "NVDA",
+    "SPY"
+  ]
+}
